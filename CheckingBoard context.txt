@@ -1,0 +1,58 @@
+Checkingboard website structure 
+
+stack: vuejs, tailwindcss, this project also needs database what do you advise for that honestly i have no idea what to choose for database
+
+the app structure gonna be like a table that is dynamic and that helps to categorize drivers by their status
+
+example of the header part of the table:
+| Driver | sign | status | notes |
+
+and drivers will be separated based on their company as well just like this:
+AK carrier (FACTOR) 
+| MOUZ TEDLA | signed | AT PU | *just empty cell* |
+| MOUZ TEDLA | signed | AT DEL | will leave in 1hour |
+AK carrier (LEADER)
+| MOUZ TEDLA | signed | GOING DEL | *just empty cell* |
+| MOUZ TEDLA | signed | SHOP | def issue, will be ready tmrw |
+UZB TRUCKING
+| MOUZ TEDLA | signed | READY | *just empty cell* |
+
+there will be separating line that consists of only company name and company name also can have extra note just like shown above AK carrier (FACTOR/FACTOR/generally this is optional and customizable)
+
+sign column will have a dropdown that consists of only 2 values: signed or not signed in different colors
+
+there are several driver statuses(statuses dropdown)
+AT PU - at pick up location (yellow)
+AT DEL - at delivery location (yellow)
+COVERED - driver has a load or going to pu (darker yellow)
+GONIG DEL - driver already has a load and going to del (blue)
+READY - ready to have a load (green)
+SHOP - at truck repair shop (orange
+HOME - driver at home (red)
+INACTIVE - driver not working anymore (light green)
+
+i want separate config file that i can change all the statuses colors easily by editing it
+
+there will be tabs bottom of the window and whenever user change the status of the driver driver will appear in another tab based on their status
+
+tabs: 
+CHECKING BOARD - tab that contains all the drivers
+AT PU/DEL - tab that contains drivers only if they're at pu or del
+READY FOR LOAD - tab that contains only ready drivers
+COVERED - tab that contains drivers who are going to pu
+GOING TO DEL - tab that contains drivers who are going to del
+HOME/INACTIVE - tab that contains drivers who are at home or not working in the company
+
+whenever i change the driver's status from category tabs, their status need to change as well in the first tab which is checking board that contains all the drivers no matter their status
+
+there will be a add company button and whenever user clicks that button form appears and it will asks for company name and optional note, user fill the application and click add then company appears in all tabs, cuz if there will be multiple companies and each company have several drivers, user can easily identify the driver that which company that they're from by looking at their company in each tab, and no any driver will be mixed up
+
+and whenever user going to add a new driver, there need to be a button on a company line line like add driver and if user clicks it form appears and it will asks for driver name, unit, and optional highlighted color, and note as well then user clicks add then driver appears just like the example of the table that i showed you above and below as well:
+AK carrier (FACTOR) 
+| MOUZ TEDLA | signed | AT PU | *just empty cell* |
+| MOUZ TEDLA | signed | AT DEL | will leave in 1hour |
+AK carrier (LEADER)
+| MOUZ TEDLA | signed | GOING DEL | *just empty cell* |
+| MOUZ TEDLA | signed | SHOP | def issue, will be ready tmrw |
+UZB TRUCKING
+| MOUZ TEDLA | signed | READY | *just empty cell* |
