@@ -24,6 +24,7 @@ an Excel workbook tab experience pinned at the bottom of the window.
 - Backend API: Node.js + Express.js + CORS (REST API server in server/server.js)
 - Runtime: Node.js v24 LTS + npm
 - One-Click Launcher: start.bat (Windows batch script)
+- GitHub Repository: https://github.com/nurillo-madaminov/CheckingBoard.git (branch: main)
 
 --------------------------------------------------------------------------------
 3. DATABASE ARCHITECTURE & STORAGE
