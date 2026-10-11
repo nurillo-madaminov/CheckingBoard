@@ -1,26 +1,47 @@
 <template>
   <tr
+    ref="rowRef"
+    :draggable="canDragCompany"
+    @dragstart="onDragStart"
+    @dragend="onDragEnd"
+    @dragover.prevent="$emit('company-drag-over', { event: $event, company })"
+    @drop.prevent="$emit('company-drop', { event: $event, company })"
     :class="[
-      'bg-slate-700 text-white select-none shadow-xs transition-colors',
-      isOver ? 'bg-slate-800 ring-2 ring-emerald-400' : ''
+      'bg-slate-700 text-white select-none transition-colors duration-150 group text-sm',
+      isDragging ? 'opacity-30 bg-slate-800' : 'hover:bg-slate-700/95'
     ]"
-    @dragover.prevent="onDragOver"
-    @dragleave="isOver = false"
-    @drop="onDrop"
   >
-    <td colspan="5" class="px-4 py-2">
+    <!-- Column 0: Company Order Number (#) - Fixed 56px Width (Draggable Handle ONLY) -->
+    <td
+      class="w-14 min-w-[56px] max-w-[56px] px-2 py-2 text-center text-xs font-mono font-bold select-none cursor-grab active:cursor-grabbing border-r border-slate-600 text-slate-300 hover:text-white bg-slate-800/95 group-hover:bg-slate-900 transition-colors"
+      @mousedown="canDragCompany = true"
+      @mouseup="canDragCompany = false"
+      @mouseleave="canDragCompany = false"
+      :title="`Drag to reorder company #${companyIndex}`"
+    >
+      <div class="flex items-center justify-center gap-1">
+        <span class="text-[10px] text-slate-400 group-hover:text-slate-200">⠿</span>
+        <span>{{ companyIndex }}</span>
+      </div>
+    </td>
+
+    <!-- Columns 1 to 4: Company Title, Count, and Optional Actions (4 cols) -->
+    <td colspan="4" class="px-4 py-2">
       <div class="flex items-center justify-between gap-3">
-        <!-- Left: Company Name + Optional Note -->
+        <!-- Left: Collapse Arrow + Company Name + Note + Count -->
         <div class="flex items-center gap-2.5">
           <button
             @click="$emit('toggle-collapse')"
-            class="text-slate-300 hover:text-white transition-colors p-0.5 rounded text-xs font-mono"
+            class="text-slate-300 hover:text-white transition-colors p-1 rounded hover:bg-slate-600/60 text-xs font-mono"
             :title="isCollapsed ? 'Expand drivers' : 'Collapse drivers'"
           >
             {{ isCollapsed ? '▶' : '▼' }}
           </button>
 
-          <span class="font-bold tracking-wide text-sm flex items-center gap-2">
+          <span
+            class="font-bold tracking-wide text-sm flex items-center gap-2 cursor-pointer"
+            @click="$emit('toggle-collapse')"
+          >
             <span>{{ company.name }}</span>
             <span
               v-if="company.note"
@@ -36,9 +57,9 @@
           </span>
         </div>
 
-        <!-- Right: Actions (+ Add Driver, Edit Company, Delete Company) -->
-        <div class="flex items-center gap-2">
-          <!-- + Add Driver Button on Company Line (As requested!) -->
+        <!-- Right: Actions (+ Add Driver, Edit, Delete) - SHOWN ONLY ON MAIN CHECKINGBOARD TAB -->
+        <div v-if="showActions" class="flex items-center gap-2">
+          <!-- + Add Driver Button -->
           <button
             @click="$emit('add-driver', company)"
             class="flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs hover:shadow transition-all active:scale-95"
@@ -79,30 +100,53 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  companyIndex: {
+    type: Number,
+    required: true
+  },
   driverCount: {
     type: Number,
     default: 0
   },
   isCollapsed: {
     type: Boolean,
+    default: true
+  },
+  showActions: {
+    type: Boolean,
+    default: true
+  },
+  isDragging: {
+    type: Boolean,
     default: false
   }
 });
 
-const emit = defineEmits(['add-driver', 'edit-company', 'delete-company', 'toggle-collapse', 'drop-driver']);
+const emit = defineEmits([
+  'add-driver',
+  'edit-company',
+  'delete-company',
+  'toggle-collapse',
+  'company-drag-start',
+  'company-drag-end',
+  'company-drag-over',
+  'company-drop'
+]);
 
-const isOver = ref(false);
+const canDragCompany = ref(false);
 
-function onDragOver(e) {
-  e.dataTransfer.dropEffect = 'move';
-  isOver.value = true;
+function onDragStart(e) {
+  if (!canDragCompany.value) {
+    e.preventDefault();
+    return;
+  }
+  emit('company-drag-start', props.company.id);
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', `company:${props.company.id}`);
 }
 
-function onDrop(e) {
-  isOver.value = false;
-  const driverId = e.dataTransfer.getData('text/plain');
-  if (driverId) {
-    emit('drop-driver', { driverId, targetCompanyId: props.company.id });
-  }
+function onDragEnd() {
+  canDragCompany.value = false;
+  emit('company-drag-end');
 }
 </script>

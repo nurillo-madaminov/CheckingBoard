@@ -206,6 +206,27 @@ export async function syncDriversOrderToSupabase(drivers) {
 }
 
 /**
+ * Batch update company ordering
+ */
+export async function syncCompaniesOrderToSupabase(companies) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const updates = companies.map((c, index) => ({
+    id: c.id,
+    name: c.name,
+    note: c.note || '',
+    order_index: index + 1
+  }));
+
+  const { error } = await supabase
+    .from('companies')
+    .upsert(updates);
+
+  if (error) console.error('Error updating company order in Supabase:', error);
+}
+
+/**
  * Setup Realtime Subscription across dispatchers
  */
 export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange }) {

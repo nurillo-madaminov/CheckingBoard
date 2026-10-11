@@ -7,8 +7,6 @@
       @open-add-company="openAddCompanyModal"
       @open-config="showConfigModal = true"
       @open-supabase="showSupabaseModal = true"
-      @export-excel="handleExportExcel"
-      @import-file="handleImportFile"
       @reset-data="handleResetData"
     />
 
@@ -22,6 +20,7 @@
         :selectedDriverId="selectedDriverId"
         @select-driver="selectedDriverId = $event"
         @reorder-driver="handleReorderDriver"
+        @reorder-company="handleReorderCompany"
         @move-driver-to-company="handleMoveDriverToCompany"
         @add-driver="openAddDriverForCompany"
         @edit-driver="openEditDriverModal"
@@ -32,12 +31,13 @@
       />
     </main>
 
-    <!-- Excel-like Bottom Sheet Tabs -->
+    <!-- Excel-like Bottom Sheet Tabs (Reorderable via Drag & Drop except Tab 0) -->
     <BottomTabs
       :tabs="tabs"
       :activeTabId="activeTabId"
       :counts="tabCounts"
       @select-tab="activeTabId = $event"
+      @reorder-tabs="handleReorderTabs"
     />
 
     <!-- Add / Edit Company Modal -->
@@ -91,7 +91,6 @@ import {
   saveDrivers,
   resetToDefaults
 } from './services/storageService';
-import { exportToExcel, parseExcelFile } from './services/excelService';
 import {
   isSupabaseReady,
   fetchCompaniesFromSupabase,
@@ -103,6 +102,7 @@ import {
   updateDriverInSupabase,
   deleteDriverFromSupabase,
   syncDriversOrderToSupabase,
+  syncCompaniesOrderToSupabase,
   subscribeToRealtimeChanges
 } from './services/supabaseService';
 
@@ -126,10 +126,39 @@ const targetCompanyId = ref('');
 
 const showConfigModal = ref(false);
 
-const tabs = BOTTOM_TABS;
+// Load tabs order from local storage
+function loadSavedTabs() {
+  try {
+    const raw = localStorage.getItem('checkingboard_tabs_order_v1');
+    if (raw) {
+      const ids = JSON.parse(raw);
+      if (Array.isArray(ids) && ids.length > 0) {
+        const ordered = [];
+        ids.forEach(id => {
+          const found = BOTTOM_TABS.find(t => t.id === id);
+          if (found) ordered.push(found);
+        });
+        BOTTOM_TABS.forEach(t => {
+          if (!ordered.find(o => o.id === t.id)) ordered.push(t);
+        });
+        const cbIdx = ordered.findIndex(t => t.id === 'CHECKING_BOARD');
+        if (cbIdx > 0) {
+          const [cb] = ordered.splice(cbIdx, 1);
+          ordered.unshift(cb);
+        }
+        return ordered;
+      }
+    }
+  } catch (e) {
+    console.error('Error loading tab order:', e);
+  }
+  return [...BOTTOM_TABS];
+}
+
+const tabs = ref(loadSavedTabs());
 
 const currentTab = computed(() => {
-  return tabs.find(t => t.id === activeTabId.value) || tabs[0];
+  return tabs.value.find(t => t.id === activeTabId.value) || tabs.value[0];
 });
 
 // Real-time Counts for all tabs
@@ -145,6 +174,29 @@ const tabCounts = computed(() => {
     HOME_INACTIVE: allDrivers.filter(d => ['HOME', 'INACTIVE', 'SHOP'].includes(d.status)).length
   };
 });
+
+// Reorder Tabs
+function handleReorderTabs({ draggedId, targetId, position }) {
+  const list = [...tabs.value];
+  const fromIdx = list.findIndex(t => t.id === draggedId);
+  const toIdx = list.findIndex(t => t.id === targetId);
+
+  // Tab 0 (CHECKING_BOARD) cannot be moved or replaced
+  if (fromIdx <= 0 || toIdx <= 0) return;
+
+  const [moved] = list.splice(fromIdx, 1);
+  const newTargetIdx = list.findIndex(t => t.id === targetId);
+  const insertIdx = position === 'before' ? newTargetIdx : newTargetIdx + 1;
+
+  list.splice(Math.max(1, insertIdx), 0, moved);
+  tabs.value = list;
+
+  try {
+    localStorage.setItem('checkingboard_tabs_order_v1', JSON.stringify(list.map(t => t.id)));
+  } catch (e) {
+    console.error('Failed to save tab order:', e);
+  }
+}
 
 // Supabase Sync Methods
 async function loadDataFromSupabase() {
@@ -231,7 +283,6 @@ function closeCompanyModal() {
 
 function saveCompany(companyData) {
   if (companyData.id) {
-    // Edit existing
     const idx = companies.value.findIndex(c => c.id === companyData.id);
     if (idx !== -1) {
       companies.value[idx] = { ...companies.value[idx], ...companyData };
@@ -240,7 +291,6 @@ function saveCompany(companyData) {
       updateCompanyInSupabase(companyData.id, companyData).catch(console.error);
     }
   } else {
-    // Add new company
     const newComp = {
       id: `comp-${Date.now()}`,
       name: companyData.name,
@@ -272,6 +322,33 @@ function deleteCompany(companyId) {
   }
 }
 
+// Company Reordering
+function handleReorderCompany({ draggedId, targetId, position }) {
+  if (draggedId === targetId) return;
+
+  const list = [...companies.value];
+  const draggedIdx = list.findIndex(c => c.id === draggedId);
+  const targetIdx = list.findIndex(c => c.id === targetId);
+
+  if (draggedIdx === -1 || targetIdx === -1) return;
+
+  const [draggedItem] = list.splice(draggedIdx, 1);
+  const newTargetIdx = list.findIndex(c => c.id === targetId);
+  const insertIdx = position === 'before' ? newTargetIdx : newTargetIdx + 1;
+
+  list.splice(insertIdx, 0, draggedItem);
+  list.forEach((c, i) => {
+    c.order = i + 1;
+  });
+
+  companies.value = list;
+  saveCompanies(list);
+
+  if (isSupabaseConnected.value) {
+    syncCompaniesOrderToSupabase(list).catch(console.error);
+  }
+}
+
 // Driver Management
 function openAddDriverForCompany(company) {
   editingDriver.value = null;
@@ -292,7 +369,6 @@ function closeDriverModal() {
 
 function saveDriver(driverData) {
   if (driverData.id) {
-    // Edit existing
     const idx = drivers.value.findIndex(d => d.id === driverData.id);
     if (idx !== -1) {
       drivers.value[idx] = { ...drivers.value[idx], ...driverData };
@@ -301,7 +377,6 @@ function saveDriver(driverData) {
       updateDriverInSupabase(driverData.id, driverData).catch(console.error);
     }
   } else {
-    // Add new driver
     const newDriver = {
       id: `drv-${Date.now()}`,
       companyId: driverData.companyId,
@@ -310,7 +385,8 @@ function saveDriver(driverData) {
       sign: driverData.sign || 'SIGNED',
       status: driverData.status || 'READY',
       notes: driverData.notes || '',
-      highlightColor: driverData.highlightColor || ''
+      highlightColor: driverData.highlightColor || '',
+      orderIndex: drivers.value.length + 1
     };
     drivers.value.push(newDriver);
     if (isSupabaseConnected.value) {
@@ -386,36 +462,8 @@ function deleteDriver(driverId) {
   }
 }
 
-// Export & Import
-function handleExportExcel() {
-  exportToExcel(companies.value, drivers.value);
-}
-
-async function handleImportFile(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-
-  try {
-    const result = await parseExcelFile(file);
-    if (result.companies && result.companies.length > 0) {
-      companies.value = result.companies;
-      saveCompanies(companies.value);
-    }
-    if (result.drivers && result.drivers.length > 0) {
-      drivers.value = result.drivers;
-      saveDrivers(drivers.value);
-    }
-    alert(`Successfully imported ${result.drivers.length} drivers!`);
-  } catch (err) {
-    console.error('Import error:', err);
-    alert('Failed to import file. Make sure it is a valid Excel or CSV file.');
-  } finally {
-    event.target.value = '';
-  }
-}
-
 function handleResetData() {
-  if (confirm('Reset all data to initial spreadsheet demo values? Any manual edits will be overwritten.')) {
+  if (confirm('Reset all data to default fleet roster? Any manual edits will be overwritten.')) {
     const data = resetToDefaults();
     companies.value = data.companies;
     drivers.value = data.drivers;

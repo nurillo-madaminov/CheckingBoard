@@ -1,7 +1,7 @@
 <template>
   <tr
     ref="rowRef"
-    :draggable="true"
+    :draggable="canDragDriver"
     @dragstart="onDragStart"
     @dragend="onDragEnd"
     @dragover.prevent="$emit('row-dragover', { event: $event, driver })"
@@ -11,13 +11,17 @@
     :class="[
       'transition-colors duration-150 group text-sm select-text relative cursor-default',
       isDragging ? 'opacity-30 bg-slate-300' : '',
-      isActive ? 'ring-2 ring-indigo-500 ring-inset shadow-xs z-10' : 'hover:brightness-95',
-      justChanged ? 'animate-pulse ring-2 ring-amber-400 ring-inset' : ''
+      isActive ? 'is-active-row z-20' : 'hover:brightness-95',
+      showColorPicker ? 'z-50 relative' : '',
+      justChanged ? 'animate-pulse' : ''
     ]"
   >
-    <!-- Column 0: ORDER NUMBER (#) - Fixed 56px Width (Just like Excel) -->
+    <!-- Column 0: ORDER NUMBER (#) - Fixed 56px Width (Draggable Handle ONLY) -->
     <td
       class="w-14 min-w-[56px] max-w-[56px] px-2 py-2 text-center text-xs font-mono font-bold select-none cursor-grab active:cursor-grabbing border-r border-slate-300 text-slate-500 hover:text-slate-800 bg-slate-100/90 group-hover:bg-slate-200/90 transition-colors"
+      @mousedown="canDragDriver = true"
+      @mouseup="canDragDriver = false"
+      @mouseleave="canDragDriver = false"
       :title="`Drag to reorder line #${orderIndex}`"
     >
       <div class="flex items-center justify-center gap-1">
@@ -26,8 +30,8 @@
       </div>
     </td>
 
-    <!-- Column 1: DRIVER (122 - Driver Name) - Fixed 320px Width -->
-    <td class="w-80 min-w-[320px] max-w-[320px] px-4 py-2 text-slate-800 font-medium overflow-hidden">
+    <!-- Column 1: DRIVER (122 - Driver Name) - Fixed 320px Width (overflow-visible for color picker) -->
+    <td class="w-80 min-w-[320px] max-w-[320px] px-4 py-2 text-slate-800 font-medium overflow-visible relative">
       <div class="flex items-center justify-between gap-2">
         <div class="flex items-center gap-2 truncate">
           <!-- Optional Color Highlight Dot -->
@@ -38,7 +42,7 @@
             title="Custom highlight"
           ></span>
 
-          <!-- Driver Display with Unit Number (NO active line badge that changes width!) -->
+          <!-- Driver Display with Unit Number (NO click-to-edit on name; edit is strictly via pencil icon) -->
           <div class="flex items-center gap-1.5 font-semibold text-slate-900 tracking-tight truncate">
             <span
               v-if="driver.unit"
@@ -48,9 +52,8 @@
             </span>
             <span v-if="driver.unit" class="text-slate-400 font-bold shrink-0">-</span>
             <span
-              class="hover:text-indigo-600 transition-colors cursor-pointer truncate"
-              @click.stop="$emit('edit', driver)"
-              :title="`Click to edit ${driver.name}`"
+              class="truncate select-text"
+              :title="driver.name"
             >
               {{ driver.name }}
             </span>
@@ -68,21 +71,24 @@
             >
               🎨
             </button>
+
+            <!-- Floating Color Palette: High z-index, appears above all next lines -->
             <div
               v-if="showColorPicker"
-              class="absolute right-0 top-7 z-30 bg-white p-2 rounded-lg shadow-xl border border-slate-200 flex gap-1.5"
+              @click.stop
+              class="absolute right-0 top-8 z-50 bg-white p-2.5 rounded-lg shadow-2xl border border-slate-300 flex items-center gap-1.5"
             >
               <button
                 v-for="color in highlightPresets"
                 :key="color.hex"
                 @click.stop="setHighlightColor(color.hex)"
-                class="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform"
+                class="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform shadow-2xs"
                 :style="{ backgroundColor: color.hex }"
                 :title="color.name"
               ></button>
               <button
                 @click.stop="setHighlightColor('')"
-                class="w-5 h-5 rounded-full border border-dashed border-slate-400 text-[10px] text-slate-500 hover:bg-slate-100 flex items-center justify-center"
+                class="w-5 h-5 rounded-full border border-dashed border-slate-400 text-[10px] text-slate-500 hover:bg-slate-100 flex items-center justify-center font-bold"
                 title="Remove highlight"
               >
                 ✕
@@ -90,13 +96,16 @@
             </div>
           </div>
 
+          <!-- Edit Driver Info (Pencil icon ONLY opens the edit modal) -->
           <button
             @click.stop="$emit('edit', driver)"
-            title="Edit driver"
+            title="Edit driver info (Unit, Name, Notes)"
             class="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-200/60 transition-colors text-xs"
           >
             ✏️
           </button>
+
+          <!-- Delete Driver -->
           <button
             @click.stop="$emit('delete', driver.id)"
             title="Delete driver"
@@ -188,7 +197,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import {
   DRIVER_STATUSES,
   SIGN_STATUSES,
@@ -230,6 +239,7 @@ const rowRef = ref(null);
 const localNotes = ref(props.driver.notes || '');
 const showColorPicker = ref(false);
 const justChanged = ref(false);
+const canDragDriver = ref(false);
 
 watch(() => props.driver.notes, (newVal) => {
   localNotes.value = newVal || '';
@@ -250,30 +260,24 @@ const highlightPresets = [
   { name: 'Purple', hex: '#E9D5FF' }
 ];
 
-// Whole line background color calculation
+// Row background styling based on active state, highlight color, and status
 const rowCustomStyle = computed(() => {
   const cfg = currentStatusConfig.value;
 
-  // Custom user highlight takes priority if explicitly set
   if (props.driver.highlightColor) {
     return {
-      backgroundColor: props.isActive ? props.driver.highlightColor + '70' : props.driver.highlightColor + '40',
-      borderLeft: `5px solid ${props.driver.highlightColor}`
+      backgroundColor: props.isActive ? props.driver.highlightColor + '70' : props.driver.highlightColor + '40'
     };
   }
 
-  // Active / Selected Line (user is working on this line!)
   if (props.isActive) {
     return {
-      backgroundColor: cfg.activeBgColor || cfg.rowBgColor || '#FEF9C3',
-      borderLeft: `5px solid ${cfg.color || cfg.borderColor || '#3B82F6'}`
+      backgroundColor: cfg.activeBgColor || cfg.rowBgColor || '#FEF9C3'
     };
   }
 
-  // Default Line Background matching Status Color
   return {
-    backgroundColor: cfg.rowBgColor || '#FFFFFF',
-    borderLeft: `4px solid ${cfg.borderColor || '#CBD5E1'}`
+    backgroundColor: cfg.rowBgColor || '#FFFFFF'
   };
 });
 
@@ -310,14 +314,34 @@ function setHighlightColor(color) {
   emit('update', { ...props.driver, highlightColor: color });
 }
 
-// Drag & Drop Handlers
+// Global click outside to close color picker
+function handleDocumentClick(e) {
+  if (showColorPicker.value && rowRef.value && !rowRef.value.contains(e.target)) {
+    showColorPicker.value = false;
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick);
+});
+
+// Drag & Drop Handlers - DRIVER CAN ONLY BE DRAGGED FROM ORDER NUMBER
 function onDragStart(e) {
+  if (!canDragDriver.value) {
+    e.preventDefault();
+    return;
+  }
   emit('drag-start', props.driver.id);
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', props.driver.id);
+  e.dataTransfer.setData('text/plain', `driver:${props.driver.id}`);
 }
 
 function onDragEnd() {
+  canDragDriver.value = false;
   emit('drag-end');
 }
 </script>

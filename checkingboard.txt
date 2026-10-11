@@ -19,33 +19,11 @@ an Excel workbook tab experience pinned at the bottom of the window.
 - Frontend: Vue 3 (Composition API with <script setup>)
 - Build Tool & Dev Server: Vite 6 (ultra-fast HMR and building)
 - Styling: Tailwind CSS 3 + PostCSS + Autoprefixer
-- Icons: Lucide Vue Next (@lucide/vue / lucide-vue-next)
-- Excel Engine: SheetJS (xlsx) for multi-sheet .xlsx export and import
+- Icons: Native Unicode & SVG icons
 - Backend API: Node.js + Express.js + CORS (REST API server in server/server.js)
 - Runtime: Node.js v24 LTS + npm
 - One-Click Launcher: start.bat (Windows batch script)
 - GitHub Repository: https://github.com/nurillo-madaminov/CheckingBoard.git (branch: main)
-
---------------------------------------------------------------------------------
-3. DATABASE ARCHITECTURE & STORAGE
---------------------------------------------------------------------------------
-Current Data Models:
-
-A. COMPANY:
-   - id: Unique identifier (e.g., "comp-1")
-   - name: Carrier or company name (e.g., "AK carrier", "EVO ELD WENZE LLC")
-   - note: Optional tag/note (e.g., "FACTOR", "LEADER", "Fleet 1")
-   - order: Display ordering index
-
-B. DRIVER:
-   - id: Unique identifier (e.g., "drv-1")
-   - companyId: Foreign key linking driver to Company
-   - unit: Truck / unit number (e.g., "122", "3447", "1860")
-   - name: Driver full name (e.g., "MOUZ TEDLA", "BRUTUS STANLEY")
-   - sign: "SIGNED" | "NO SIGN"
-   - status: Current dispatch status (AT PU, AT DEL, COVERED, GOING DEL, READY, SHOP, HOME, INACTIVE)
-   - notes: Free-form text notes (e.g., "will leave in 1hour", "def issue")
-   - highlightColor: Optional custom row color (#FEF08A, #FED7AA, etc.)
 
 --------------------------------------------------------------------------------
 3. DATABASE ARCHITECTURE & STORAGE (SUPABASE PLAN B IMPLEMENTED)
@@ -65,8 +43,8 @@ A. SUPABASE TABLES:
 2. public.drivers:
    - id TEXT PRIMARY KEY (e.g., "drv-1")
    - company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE
-   - unit TEXT DEFAULT '' (e.g., "122")
-   - name TEXT NOT NULL (e.g., "MOUZ TEDLA")
+   - unit TEXT DEFAULT '' (e.g., "122", "898", "27092")
+   - name TEXT NOT NULL (e.g., "MOUZ TEDLA", "JEAN JOACHIM")
    - sign TEXT DEFAULT 'SIGNED'
    - status TEXT DEFAULT 'READY'
    - notes TEXT DEFAULT ''
@@ -81,130 +59,112 @@ B. REALTIME WEBSOCKETS REPLICATION:
      broadcasts the change live. All connected dispatchers receive the update
      instantly without refreshing their browser.
 
-C. PERSISTENCE & CREDENTIAL LAYERS:
+C. FLEET ROSTER POPULATION (10 Carrier Companies & 194 Drivers):
+   The database and storage services are pre-populated with the company roster:
+   1. INFINITY LOGISTEX LLC (7 drivers)
+   2. RUZBEK LOGISTICS INC (4 drivers)
+   3. AK CARRIER LLC [FACTOR] (8 drivers)
+   4. AK CARRIER LLC [LEADER] (47 drivers)
+   5. UMAR INC LLC [TT ELD] (43 drivers)
+   6. UZB TRUCKING LLC [LEADER ELD] (33 drivers)
+   7. UZB TRUCKING LLC [FACTOR ELD] (15 drivers)
+   8. CARGO KINGS INC (12 drivers)
+   9. BIG LIFE LOGISTICS (24 drivers, including unit numbers 898, 142, 27092, etc.)
+   10. MKM GLOBAL INC (1 driver)
+
+D. PERSISTENCE & CREDENTIAL LAYERS:
 1. Supabase Client & Service:
    - src/services/supabaseClient.js: reads from .env or browser localStorage.
-   - src/services/supabaseService.js: full CRUD + postgres_changes real-time channel.
+   - src/services/supabaseService.js: full CRUD + postgres_changes real-time channel
+     + syncDriversOrderToSupabase + syncCompaniesOrderToSupabase.
    - src/components/SupabaseConnectModal.vue: in-app modal to test connection,
      input Project URL & anon key, or disconnect.
 2. Offline / Local Fallback:
    - Browser LocalStorage (src/services/storageService.js) ensures the app
      continues to work seamlessly offline if Supabase is disconnected.
-3. Express REST API (server/server.js):
-   - Optional local Node.js server storing to server/data.json.
 
 --------------------------------------------------------------------------------
-4. TABLE STRUCTURE & COLUMNS
+4. TABLE STRUCTURE & LOCKED COLUMNS
 --------------------------------------------------------------------------------
-The dynamic table consists of 5 columns:
+The dynamic table consists of 5 fixed-width columns with zero jitter:
 1. # (Order Number):
-   - Excel-style row number column on the left (1, 2, 3...).
-   - Acts as a drag handle (with grip indicator ⠿) for drag-and-drop reordering.
+   - Fixed 56px width (Col 0).
+   - Sequential Excel-style row number (1, 2, 3...) for both drivers and companies.
+   - Acts as the ONLY drag handle (with grip indicator ⠿) for drag-and-drop reordering.
 2. Driver (Unit - Name):
-   - Combines unit and name: e.g., "122 - MOUZ TEDLA".
-   - Separate unit number badge + driver name.
+   - Fixed 320px width (Col 1).
+   - Formatted as "[unit] - [driver name]" when unit is present, or "[driver name]".
+   - Text selection is preserved. Clicking name selects the row without opening edit modal.
 3. Sign:
-   - Dropdown with 2 values:
-     * SIGNED (soft emerald green badge)
-     * NO SIGN (soft rose red badge)
+   - Fixed 140px width (Col 2).
+   - Dropdown with SIGNED / NO SIGN options.
 4. Status:
-   - Dropdown with 8 operational driver statuses and distinct colors:
-     * AT PU       - At pick up location (Yellow)
-     * AT DEL      - At delivery location (Yellow)
-     * COVERED     - Driver has load or going to pickup (Darker Yellow / Amber)
-     * GOING DEL   - Loaded and en route to delivery (Blue)
-     * READY       - Empty and ready for load assignment (Green)
-     * SHOP        - Truck at repair shop (Orange)
-     * HOME        - Driver off duty at home (Red)
-     * INACTIVE    - Off fleet / not working (Light Green)
+   - Fixed 190px width (Col 3).
+   - Operational statuses: AT PU, AT DEL, COVERED, GOING DEL, READY, SHOP, HOME, INACTIVE.
 5. Notes:
-   - Inline editable text notes cell with auto-save.
+   - Flexible remaining width (Col 4).
+   - Inline text input with auto-save on blur / enter.
 
 --------------------------------------------------------------------------------
-5. COMPANY SEPARATOR ROWS
+5. COMPANY SEPARATOR ROWS & COLLAPSIBLE VIEWS
 --------------------------------------------------------------------------------
-- Dark separating line displaying: Company Name + Optional Note (e.g. "AK carrier (FACTOR)")
-- Inline "+ Add Driver" button directly on each company line.
-- Driver counter pill showing how many drivers are in that company.
-- Expand / collapse toggle (arrow button).
-- Edit and delete company controls.
-- Drop target: Dragging a driver line onto a company header moves the driver to that company.
-
---------------------------------------------------------------------------------
-6. STATUS CONFIGURATION FILE
---------------------------------------------------------------------------------
-- File path: src/config/statusConfig.js
-- Allows changing status codes, descriptions, background colors, text colors,
-  borders, and row background colors in one central place without modifying app code.
-- Interactive in-app modal (🎨 Status Colors button) also allows adjusting colors live.
+- Order Number Handle (#): Companies have their own sequential order number cell
+  on the left (Column 0, 56px) with drag grip (⠿ 1, ⠿ 2...). Companies can ONLY
+  be dragged and reordered via this order handle.
+- Closed / Collapsed by Default: When opening the app or switching views, companies
+  start in a collapsed state by default for clean and structured browsing.
+- Expand All / Collapse All Toggle: Added top bar button to quickly expand or collapse
+  all companies in a single click.
+- Main Tab vs Category Tabs Action Isolation:
+  * In the main "CHECKING BOARD" tab: companies display action buttons (+ Add Driver,
+    ✏️ Edit, 🗑️ Delete).
+  * In all category tabs (AT PU/DEL, READY, etc.): all company action buttons are
+    hidden to avoid accidental modifications outside the master view.
 
 --------------------------------------------------------------------------------
-7. BOTTOM SHEET TABS (EXCEL-STYLE)
+6. DRAG AND DROP REORDERING SPECIFICATION
 --------------------------------------------------------------------------------
-Pinned at the bottom of the window, matching the SAFETY_BOARD_dynamic.xlsx tabs:
-1. CHECKING BOARD   - Full view containing all drivers across all companies
-2. AT PU/DEL        - Filtered to drivers with status AT PU or AT DEL
-3. READY FOR LOAD   - Filtered to drivers with status READY
-4. COVERED          - Filtered to drivers with status COVERED
-5. GOING TO DEL     - Filtered to drivers with status GOING DEL
-6. HOME/INACTIVE    - Filtered to drivers with status HOME, INACTIVE, or SHOP
-
-Live Counter Pills: Each bottom tab has a badge showing the live count of drivers.
-Two-Way Reactivity: Changing status from any category tab automatically updates
-the driver in the main CHECKING BOARD and smoothly relocates them between tabs.
-
---------------------------------------------------------------------------------
-8. NEW FEATURES LOG (RECENT ADDITIONS)
---------------------------------------------------------------------------------
-Feature 1: Left-Side Order Number Column (#)
-- Added an Excel-style # column on the left side of the table.
-- Displays sequential row numbering (1, 2, 3...) matching Excel's line indexing.
-
-Feature 2: Drag & Drop Line Reordering with Excel-Style Guide Line
-- Drivers can be reordered like lines in Excel using native HTML5 drag-and-drop.
-- Fixed Drop Indicator: When dragging a line over other rows, a prominent, full-width
-  solid blue Excel insertion guide line (h-1 bg-blue-600) with arrow endcaps (◀ --- ▶)
-  dynamically appears above or below the target row, showing the exact placement point.
-- Supports reordering within a company, between different companies, or dropping
-  onto company headers.
-- Reordered state is automatically saved to persistence.
-
-Feature 3: Status-Based Whole Line Highlighting & Active Line Focus
-- Changing a driver's status immediately changes the entire row line background
-  to match that status's color tint (yellow, amber, blue, green, orange, red, lime).
-- When a user clicks a row or interacts with status/sign/notes, the row is marked
-  as the ACTIVE LINE:
-  * Richer active background color
-  * 5px colored indicator bar on the left
-  * Inset focus ring around the row
-  * 1-second pulse confirmation animation when status changes so the dispatcher
-    clearly sees what line they are working on and never gets mixed up.
-
-Feature 4: Locked Column Widths & Zero Layout Jitter
-- Applied table-fixed layout with strict <colgroup> dimensions:
-  * Col 0 (# Order): Fixed 56px (w-14)
-  * Col 1 (Driver): Fixed 320px (w-80) with text truncation
-  * Col 2 (Sign): Fixed 140px (w-36)
-  * Col 3 (Status): Fixed 190px (w-48)
-  * Col 4 (Notes): Flexible remaining width
-- Removed the expanding "ACTIVE LINE" text badge that previously caused the first
-  column's width to shift when clicking rows. Columns are now completely static
-  and stable under all interactions.
-
-Feature 5: Supabase Cloud Database Integration & Real-time Sync (Plan B)
-- Implemented full Supabase integration using @supabase/supabase-js.
-- Cloud PostgreSQL schema with Row Level Security (RLS) created in supabase_schema.sql.
-- Enabled Supabase Realtime publication on public.companies and public.drivers.
-- When any dispatcher updates status, reorders rows, adds drivers, or edits notes,
-  the change broadcasts live to all connected devices without page refreshes.
-- In-App Connection UI: Added "Connect DB / Supabase Live" button in top StatsBar.
-  Opens an intuitive modal allowing users to enter and test Project URL and anon API key
-  without touching code or environment variables.
-- Offline-First Resilience: If disconnected or credentials are missing, seamlessly
-  maintains local storage persistence so the application never breaks.
+1. Drivers:
+   - Reordering is restricted STRICTLY to the order number (#) cell on the left.
+   - Dragging cannot be triggered from driver name, dropdowns, notes, or buttons.
+   - Prominent blue Excel-style insertion indicator (◀ --- ▶) dynamically shows
+     whether the line will drop above or below the target row.
+2. Companies:
+   - Reordering is restricted STRICTLY to the company order number (#) cell on the left.
+   - Full-width blue insertion guide line indicates target placement.
+   - Reordering smoothly updates company order across state, storage, and Supabase.
+3. Bottom Sheet Tabs:
+   - The first tab (CHECKING BOARD) is fixed and locked in position 0.
+   - All other tabs (tabs 1..N) can be reordered via drag-and-drop with vertical blue
+     insertion line markers.
+   - Custom tab order is persisted in localStorage ('checkingboard_tabs_order_v1').
 
 --------------------------------------------------------------------------------
-9. GUIDELINE FOR FUTURE CHANGES
+7. UI/UX FIXES & REFINEMENTS
+--------------------------------------------------------------------------------
+1. Symmetrical Active Row Border:
+   - Fixed the visual bug where the top border of the active line appeared thicker.
+   - Active row uses uniform 2px indigo borders on top and bottom, with preceding row
+     bottom border suppression (.table-grid tr:has(+ tr.is-active-row) td).
+2. Color Picker Z-Index:
+   - Fixed color palette popup clipping and layering underneath subsequent lines.
+   - Driver cell set to overflow-visible and active picker row given z-50 relative.
+   - Added click-outside listener to dismiss color picker smoothly.
+3. Driver Edit Access:
+   - Removed unintentional click-to-edit trigger on driver name text.
+   - Edit modal is strictly opened via the ✏️ pencil icon in hover actions.
+4. Input Letter Casing:
+   - Removed forced CSS uppercase transformation in Add Company and Add Driver modals.
+   - Preserves exact typed letter casing (lower, upper, mixed case).
+5. Modal Dismissal (Esc & Click Outside):
+   - All modals (Add Company, Add Driver, Status Config, Supabase Connect) close
+     when pressing the Esc key and when clicking anywhere outside the modal dialog card.
+6. Removed Excel Import / Export:
+   - Removed "Export Excel" and "Import" buttons and logic as requested to streamline
+     dispatch workflows directly through cloud/local storage.
+
+--------------------------------------------------------------------------------
+8. GUIDELINE FOR FUTURE CHANGES
 --------------------------------------------------------------------------------
 Whenever any new feature, column, setting, or database change is added to this
 project, this checkingboard.txt file MUST be updated with the feature description,

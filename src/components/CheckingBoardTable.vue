@@ -1,24 +1,50 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden bg-white">
-    <!-- Active Tab Banner (if in a specific category tab) -->
+    <!-- Top Bar: Category Banner & Expand/Collapse All Toggle -->
     <div
-      v-if="currentTab.id !== 'CHECKING_BOARD'"
-      class="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center justify-between text-xs shrink-0"
+      class="bg-slate-50 border-b border-slate-200 px-4 py-2 flex items-center justify-between text-xs shrink-0 select-none"
     >
-      <div class="flex items-center gap-2">
-        <span class="font-bold text-slate-800 uppercase tracking-wider text-xs">
-          {{ currentTab.label }}
-        </span>
-        <span class="text-slate-400">—</span>
-        <span class="text-slate-600 font-medium italic">
-          {{ currentTab.subtitle }}
-        </span>
-      </div>
       <div class="flex items-center gap-3">
-        <span class="text-slate-500 font-medium">Drivers in this view:</span>
-        <span class="px-2 py-0.5 rounded font-bold text-xs bg-emerald-100 text-emerald-800 border border-emerald-300">
-          {{ totalVisibleDrivers }}
-        </span>
+        <template v-if="currentTab.id !== 'CHECKING_BOARD'">
+          <span class="font-bold text-slate-800 uppercase tracking-wider text-xs">
+            {{ currentTab.label }}
+          </span>
+          <span class="text-slate-400">—</span>
+          <span class="text-slate-600 font-medium italic">
+            {{ currentTab.subtitle }}
+          </span>
+        </template>
+        <template v-else>
+          <span class="font-bold text-slate-800 uppercase tracking-wider text-xs">
+            Main Board
+          </span>
+          <span class="text-slate-400">—</span>
+          <span class="text-slate-500 font-medium">
+            All Carrier Companies & Drivers
+          </span>
+        </template>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Expand / Collapse All Toggle Button -->
+        <button
+          @click="toggleAllCompanies"
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-300 transition-colors shadow-2xs"
+          :title="allCollapsed ? 'Expand all companies' : 'Collapse all companies'"
+        >
+          <span>{{ allCollapsed ? '▼' : '▶' }}</span>
+          <span>{{ allCollapsed ? 'Expand All' : 'Collapse All' }}</span>
+        </button>
+
+        <span class="text-slate-300">|</span>
+
+        <!-- Drivers count -->
+        <div class="flex items-center gap-1.5">
+          <span class="text-slate-500 font-medium">Drivers in view:</span>
+          <span class="px-2 py-0.5 rounded font-bold text-xs bg-emerald-100 text-emerald-800 border border-emerald-300">
+            {{ totalVisibleDrivers }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -28,9 +54,8 @@
       @dragover.prevent
       @drop.prevent="onContainerDrop"
     >
-      <!-- TABLE FIXED: Guaranteed Locked Column Widths -->
       <table class="w-full text-left table-grid border-separate table-fixed">
-        <!-- Strictly Defined Column Widths -->
+        <!-- Strictly Defined Locked Column Widths -->
         <colgroup>
           <col style="width: 56px;" />
           <col style="width: 320px;" />
@@ -40,7 +65,7 @@
         </colgroup>
 
         <!-- Table Column Headers -->
-        <thead class="sticky top-0 z-20 bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-wider shadow-xs">
+        <thead class="sticky top-0 z-30 bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-wider shadow-xs">
           <tr>
             <!-- Col 0: Excel-style Row # Header (Fixed 56px) -->
             <th class="w-14 min-w-[56px] max-w-[56px] px-2 py-2.5 border-b border-r border-slate-300 text-center select-none bg-slate-200/90 text-slate-700">
@@ -79,33 +104,63 @@
           </tr>
 
           <!-- Company Sections -->
-          <template v-for="company in filteredCompanies" :key="company.id">
-            <!-- Company Separator Line -->
+          <template v-for="(company, compIdx) in filteredCompanies" :key="company.id">
+            <!-- COMPANY INSERTION GUIDE LINE: BEFORE -->
+            <tr
+              v-if="dropTargetCompany && dropTargetCompany.companyId === company.id && dropTargetCompany.position === 'before'"
+              class="pointer-events-none select-none"
+            >
+              <td colspan="5" class="p-0 border-0 h-1.5 bg-blue-600 relative shadow-sm">
+                <div class="h-1.5 bg-blue-600 w-full relative flex items-center">
+                  <span class="absolute -left-1 w-3 h-3 bg-blue-600 rotate-45"></span>
+                  <span class="absolute -right-1 w-3 h-3 bg-blue-600 rotate-45"></span>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Company Header Row (Draggable via order number handle) -->
             <CompanyHeaderRow
               :company="company"
+              :companyIndex="compIdx + 1"
               :driverCount="getCompanyDrivers(company.id).length"
-              :isCollapsed="collapsedCompanies[company.id]"
+              :isCollapsed="isCompanyCollapsed(company.id)"
+              :showActions="currentTab.id === 'CHECKING_BOARD'"
+              :isDragging="draggedCompanyId === company.id"
               @toggle-collapse="toggleCompanyCollapse(company.id)"
               @add-driver="$emit('add-driver', company)"
               @edit-company="$emit('edit-company', company)"
               @delete-company="$emit('delete-company', company.id)"
-              @drop-driver="handleDropOnCompany"
+              @company-drag-start="handleCompanyDragStart"
+              @company-drag-end="handleCompanyDragEnd"
+              @company-drag-over="handleCompanyDragOver"
+              @company-drop="handleCompanyDrop"
             />
 
-            <!-- Driver Rows (if not collapsed) -->
-            <template v-if="!collapsedCompanies[company.id]">
+            <!-- COMPANY INSERTION GUIDE LINE: AFTER -->
+            <tr
+              v-if="dropTargetCompany && dropTargetCompany.companyId === company.id && dropTargetCompany.position === 'after'"
+              class="pointer-events-none select-none"
+            >
+              <td colspan="5" class="p-0 border-0 h-1.5 bg-blue-600 relative shadow-sm">
+                <div class="h-1.5 bg-blue-600 w-full relative flex items-center">
+                  <span class="absolute -left-1 w-3 h-3 bg-blue-600 rotate-45"></span>
+                  <span class="absolute -right-1 w-3 h-3 bg-blue-600 rotate-45"></span>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Driver Rows (Rendered only if company is NOT collapsed) -->
+            <template v-if="!isCompanyCollapsed(company.id)">
               <template v-for="driver in getCompanyDrivers(company.id)" :key="driver.id">
-                <!-- EXCEL-STYLE INSERTION GUIDE LINE: Shown BEFORE this row -->
+                <!-- DRIVER INSERTION GUIDE LINE: BEFORE -->
                 <tr
                   v-if="dropTarget && dropTarget.driverId === driver.id && dropTarget.position === 'before'"
                   class="pointer-events-none select-none"
                 >
-                  <td colspan="5" class="p-0 border-0 h-1 bg-blue-600 relative shadow-sm">
-                    <div class="h-1 bg-blue-600 w-full relative flex items-center">
-                      <!-- Left arrow guide -->
-                      <span class="absolute -left-1 w-2.5 h-2.5 bg-blue-600 rotate-45"></span>
-                      <!-- Right arrow guide -->
-                      <span class="absolute -right-1 w-2.5 h-2.5 bg-blue-600 rotate-45"></span>
+                  <td colspan="5" class="p-0 border-0 h-1.5 bg-blue-600 relative shadow-sm">
+                    <div class="h-1.5 bg-blue-600 w-full relative flex items-center">
+                      <span class="absolute -left-1 w-3 h-3 bg-blue-600 rotate-45"></span>
+                      <span class="absolute -right-1 w-3 h-3 bg-blue-600 rotate-45"></span>
                     </div>
                   </td>
                 </tr>
@@ -126,15 +181,15 @@
                   @row-drop="handleRowDrop"
                 />
 
-                <!-- EXCEL-STYLE INSERTION GUIDE LINE: Shown AFTER this row -->
+                <!-- DRIVER INSERTION GUIDE LINE: AFTER -->
                 <tr
                   v-if="dropTarget && dropTarget.driverId === driver.id && dropTarget.position === 'after'"
                   class="pointer-events-none select-none"
                 >
-                  <td colspan="5" class="p-0 border-0 h-1 bg-blue-600 relative shadow-sm">
-                    <div class="h-1 bg-blue-600 w-full relative flex items-center">
-                      <span class="absolute -left-1 w-2.5 h-2.5 bg-blue-600 rotate-45"></span>
-                      <span class="absolute -right-1 w-2.5 h-2.5 bg-blue-600 rotate-45"></span>
+                  <td colspan="5" class="p-0 border-0 h-1.5 bg-blue-600 relative shadow-sm">
+                    <div class="h-1.5 bg-blue-600 w-full relative flex items-center">
+                      <span class="absolute -left-1 w-3 h-3 bg-blue-600 rotate-45"></span>
+                      <span class="absolute -right-1 w-3 h-3 bg-blue-600 rotate-45"></span>
                     </div>
                   </td>
                 </tr>
@@ -169,7 +224,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import CompanyHeaderRow from './CompanyHeaderRow.vue';
 import DriverRow from './DriverRow.vue';
 
@@ -205,16 +260,41 @@ const emit = defineEmits([
   'delete-company',
   'select-driver',
   'reorder-driver',
+  'reorder-company',
   'move-driver-to-company'
 ]);
 
+// Collapsed state: CLOSED (COLLAPSED) BY DEFAULT as requested
 const collapsedCompanies = ref({});
+
+function isCompanyCollapsed(companyId) {
+  // If not explicitly set to false, it is collapsed (true) by default
+  return collapsedCompanies.value[companyId] !== false;
+}
+
+function toggleCompanyCollapse(companyId) {
+  const current = isCompanyCollapsed(companyId);
+  collapsedCompanies.value[companyId] = !current;
+}
+
+const allCollapsed = computed(() => {
+  return props.companies.every(c => isCompanyCollapsed(c.id));
+});
+
+function toggleAllCompanies() {
+  const targetState = allCollapsed.value ? false : true; // if all collapsed, expand all (false); otherwise collapse all (true)
+  props.companies.forEach(c => {
+    collapsedCompanies.value[c.id] = targetState;
+  });
+}
+
+// Driver Drag & Drop State
 const draggedDriverId = ref(null);
 const dropTarget = ref(null); // { driverId, position: 'before' | 'after', companyId }
 
-function toggleCompanyCollapse(companyId) {
-  collapsedCompanies.value[companyId] = !collapsedCompanies.value[companyId];
-}
+// Company Drag & Drop State
+const draggedCompanyId = ref(null);
+const dropTargetCompany = ref(null); // { companyId, position: 'before' | 'after' }
 
 // Get drivers for a company based on tab filter & search query
 function getCompanyDrivers(companyId) {
@@ -240,7 +320,7 @@ function getCompanyDrivers(companyId) {
   return list;
 }
 
-// In category tabs, hide companies that have 0 matching drivers (or keep all if searching)
+// In category tabs, hide companies that have 0 matching drivers
 const filteredCompanies = computed(() => {
   if (props.currentTab.id === 'CHECKING_BOARD') {
     return props.companies;
@@ -252,7 +332,7 @@ const filteredCompanies = computed(() => {
 const visibleDriversList = computed(() => {
   const result = [];
   filteredCompanies.value.forEach(comp => {
-    if (!collapsedCompanies.value[comp.id]) {
+    if (!isCompanyCollapsed(comp.id)) {
       const compDrivers = getCompanyDrivers(comp.id);
       compDrivers.forEach(d => result.push(d));
     }
@@ -260,7 +340,6 @@ const visibleDriversList = computed(() => {
   return result;
 });
 
-// Computes the 1-based row index just like Excel line numbers
 function getRowIndex(driverId) {
   const index = visibleDriversList.value.findIndex(d => d.id === driverId);
   return index !== -1 ? index + 1 : 1;
@@ -270,7 +349,7 @@ const totalVisibleDrivers = computed(() => {
   return visibleDriversList.value.length;
 });
 
-// Drag & Drop Management
+// ================= DRIVER DRAG & DROP =================
 function handleDragStart(driverId) {
   draggedDriverId.value = driverId;
   dropTarget.value = null;
@@ -323,12 +402,59 @@ function handleRowDrop({ event, driver }) {
   handleDragEnd();
 }
 
-function handleDropOnCompany({ driverId, targetCompanyId }) {
-  emit('move-driver-to-company', { driverId, targetCompanyId });
-  handleDragEnd();
+// ================= COMPANY DRAG & DROP =================
+function handleCompanyDragStart(companyId) {
+  draggedCompanyId.value = companyId;
+  dropTargetCompany.value = null;
+}
+
+function handleCompanyDragEnd() {
+  draggedCompanyId.value = null;
+  dropTargetCompany.value = null;
+}
+
+function handleCompanyDragOver({ event, company }) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+
+  if (!draggedCompanyId.value || draggedCompanyId.value === company.id) {
+    dropTargetCompany.value = null;
+    return;
+  }
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  const offset = event.clientY - rect.top;
+  const position = offset < (rect.height / 2) ? 'before' : 'after';
+
+  dropTargetCompany.value = {
+    companyId: company.id,
+    position
+  };
+}
+
+function handleCompanyDrop({ event, company }) {
+  event.preventDefault();
+
+  if (!draggedCompanyId.value || !dropTargetCompany.value) {
+    handleCompanyDragEnd();
+    return;
+  }
+
+  const { companyId, position } = dropTargetCompany.value;
+
+  if (draggedCompanyId.value !== companyId) {
+    emit('reorder-company', {
+      draggedId: draggedCompanyId.value,
+      targetId: companyId,
+      position: position
+    });
+  }
+
+  handleCompanyDragEnd();
 }
 
 function onContainerDrop() {
   handleDragEnd();
+  handleCompanyDragEnd();
 }
 </script>

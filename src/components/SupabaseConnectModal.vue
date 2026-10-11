@@ -1,6 +1,10 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+    @click.self="$emit('close')"
+  >
     <div
+      @click.stop
       class="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
       <!-- Header -->
@@ -50,7 +54,7 @@
               v-model="url"
               type="text"
               placeholder="https://your-project.supabase.co"
-              class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
             />
           </div>
 
@@ -58,56 +62,66 @@
             <label class="block font-bold text-slate-700 mb-1">
               Anon Public API Key <span class="text-rose-500">*</span>
             </label>
-            <input
+            <textarea
               v-model="key"
-              type="password"
+              rows="3"
               placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-              class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+            ></textarea>
           </div>
         </div>
 
-        <!-- Setup Instructions & SQL Script Tip -->
-        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-slate-600 leading-relaxed">
-          <p class="font-bold text-slate-800 text-[11px]">📋 Quick 2-Minute Setup Steps:</p>
-          <ol class="list-decimal list-inside space-y-1 text-[11px]">
-            <li>Create a free project at <a href="https://supabase.com" target="_blank" class="text-emerald-700 font-bold underline">supabase.com</a>.</li>
-            <li>Go to <strong>SQL Editor</strong> and run the script in <code class="bg-slate-200 px-1 py-0.5 rounded font-mono font-bold text-slate-800">supabase_schema.sql</code> (in your project folder).</li>
-            <li>Copy your <strong>Project URL</strong> and <strong>anon key</strong> from <strong>Project Settings -> API</strong> and paste them above.</li>
-          </ol>
+        <!-- Feedback message -->
+        <div
+          v-if="testMessage"
+          :class="[
+            'p-2.5 rounded-lg text-xs font-semibold',
+            testSuccess ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'
+          ]"
+        >
+          {{ testMessage }}
         </div>
 
-        <!-- Test Message -->
-        <div v-if="testMessage" :class="testSuccess ? 'text-emerald-700 font-semibold' : 'text-rose-600 font-semibold'">
-          {{ testMessage }}
+        <!-- SQL Schema Guide -->
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
+          <div class="font-bold text-slate-700 flex items-center justify-between">
+            <span>Schema Setup Required:</span>
+            <span class="font-mono text-[10px] text-slate-500">supabase_schema.sql</span>
+          </div>
+          <p class="text-[11px] text-slate-600 leading-relaxed">
+            Ensure you copied and ran the SQL statements from <code class="bg-white px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-800">supabase_schema.sql</code> in your Supabase SQL Editor.
+          </p>
         </div>
       </div>
 
-      <!-- Footer Buttons -->
+      <!-- Footer Actions -->
       <div class="bg-slate-100 px-5 py-3 border-t border-slate-200 flex items-center justify-between">
         <button
-          v-if="url || key"
+          v-if="isConnected"
           @click="disconnect"
-          class="text-xs text-rose-600 hover:text-rose-800 font-semibold underline"
+          type="button"
+          class="text-xs font-semibold text-rose-600 hover:text-rose-800 hover:underline"
         >
-          Disconnect
+          Disconnect Database
         </button>
         <span v-else></span>
 
         <div class="flex items-center gap-2">
           <button
+            type="button"
             @click="testConnection"
             :disabled="isTesting || !url || !key"
-            class="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-colors disabled:opacity-50"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 border border-slate-300 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
           >
             {{ isTesting ? 'Testing...' : 'Test Connection' }}
           </button>
           <button
+            type="button"
             @click="saveAndConnect"
             :disabled="!url || !key"
-            class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs hover:shadow transition-all disabled:opacity-50"
+            class="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-xs hover:shadow disabled:opacity-50"
           >
-            Save & Connect
+            Connect & Sync
           </button>
         </div>
       </div>
@@ -116,27 +130,27 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import { getSupabaseCredentials, saveSupabaseCredentials } from '../services/supabaseClient';
-import { isSupabaseReady, fetchCompaniesFromSupabase } from '../services/supabaseService';
+import { ref, onMounted, onUnmounted } from 'vue';
+import {
+  getSupabaseCredentials,
+  saveSupabaseCredentials
+} from '../services/supabaseClient';
+import { fetchCompaniesFromSupabase } from '../services/supabaseService';
 
 const emit = defineEmits(['close', 'connected']);
 
-const url = ref('');
-const key = ref('');
-const isConnected = ref(false);
+const creds = getSupabaseCredentials();
+const url = ref(creds.url);
+const key = ref(creds.key);
+
+const isConnected = ref(Boolean(creds.url && creds.key));
 const isTesting = ref(false);
 const testMessage = ref('');
 const testSuccess = ref(false);
 
-onMounted(() => {
-  const creds = getSupabaseCredentials();
-  url.value = creds.url;
-  key.value = creds.key;
-  isConnected.value = isSupabaseReady();
-});
-
 async function testConnection() {
+  if (!url.value || !key.value) return;
+
   isTesting.value = true;
   testMessage.value = '';
   try {
@@ -174,4 +188,18 @@ function disconnect() {
   testSuccess.value = false;
   emit('connected');
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape') {
+    emit('close');
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+});
 </script>

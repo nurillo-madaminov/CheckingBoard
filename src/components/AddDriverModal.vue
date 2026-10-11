@@ -1,6 +1,10 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+    @click.self="$emit('close')"
+  >
     <div
+      @click.stop
       class="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
       <!-- Modal Header -->
@@ -31,7 +35,7 @@
           <label class="block text-xs font-bold text-slate-700 mb-1">Company</label>
           <select
             v-model="form.companyId"
-            class="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+            class="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-800"
             required
           >
             <option v-for="c in companies" :key="c.id" :value="c.id">
@@ -51,11 +55,11 @@
               v-model="form.unit"
               type="text"
               placeholder="122"
-              class="w-full text-sm font-mono font-bold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              class="w-full text-sm font-mono font-bold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
             />
           </div>
 
-          <!-- Driver Name -->
+          <!-- Driver Name (Exact casing preserved, NO forced uppercase) -->
           <div class="col-span-2">
             <label class="block text-xs font-bold text-slate-700 mb-1">
               Driver Name <span class="text-rose-500">*</span>
@@ -65,7 +69,7 @@
               type="text"
               placeholder="e.g. MOUZ TEDLA"
               required
-              class="w-full text-sm font-semibold uppercase px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              class="w-full text-sm font-semibold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
             />
           </div>
         </div>
@@ -85,7 +89,7 @@
             <label class="block text-xs font-bold text-slate-700 mb-1">Sign Status</label>
             <select
               v-model="form.sign"
-              class="w-full text-xs font-bold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+              class="w-full text-xs font-bold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-slate-800"
             >
               <option v-for="s in signOptions" :key="s.code" :value="s.code">
                 {{ s.label }}
@@ -98,7 +102,7 @@
             <label class="block text-xs font-bold text-slate-700 mb-1">Driver Status</label>
             <select
               v-model="form.status"
-              class="w-full text-xs font-bold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              class="w-full text-xs font-bold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
             >
               <option v-for="st in statusOptions" :key="st.code" :value="st.code">
                 {{ st.code }} - {{ st.label }}
@@ -107,45 +111,46 @@
           </div>
         </div>
 
-        <!-- Highlight Color (Optional) -->
+        <!-- Notes Input -->
         <div>
           <label class="block text-xs font-bold text-slate-700 mb-1">
-            Row Highlight Color <span class="text-slate-400 font-normal">(Optional)</span>
-          </label>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              v-for="color in highlightPresets"
-              :key="color.hex"
-              @click="form.highlightColor = form.highlightColor === color.hex ? '' : color.hex"
-              class="w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex items-center justify-center text-xs"
-              :class="form.highlightColor === color.hex ? 'border-slate-800 scale-105 shadow-md' : 'border-slate-300'"
-              :style="{ backgroundColor: color.hex }"
-              :title="color.name"
-            >
-              <span v-if="form.highlightColor === color.hex" class="text-slate-900 font-bold text-xs">✓</span>
-            </button>
-            <button
-              type="button"
-              @click="form.highlightColor = ''"
-              class="text-xs px-2.5 py-1 text-slate-500 hover:text-slate-800 border border-slate-300 rounded hover:bg-slate-100"
-            >
-              None
-            </button>
-          </div>
-        </div>
-
-        <!-- Note (Optional) -->
-        <div>
-          <label class="block text-xs font-bold text-slate-700 mb-1">
-            Note <span class="text-slate-400 font-normal">(Optional)</span>
+            Notes <span class="text-slate-400 font-normal">(Optional dispatch comment)</span>
           </label>
           <input
             v-model="form.notes"
             type="text"
             placeholder="e.g. will leave in 1hour, def issue, etc."
-            class="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            class="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
           />
+        </div>
+
+        <!-- Row Highlight Color -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">
+            Row Custom Highlight Color <span class="text-slate-400 font-normal">(Optional)</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <button
+              v-for="color in highlightPresets"
+              :key="color.hex"
+              type="button"
+              @click="form.highlightColor = color.hex"
+              :class="[
+                'w-7 h-7 rounded-full border-2 transition-transform shadow-2xs',
+                form.highlightColor === color.hex ? 'scale-110 border-slate-900 ring-2 ring-indigo-500' : 'border-slate-300 hover:scale-105'
+              ]"
+              :style="{ backgroundColor: color.hex }"
+              :title="color.name"
+            ></button>
+            <button
+              type="button"
+              @click="form.highlightColor = ''"
+              class="px-2 py-1 text-xs text-slate-500 hover:text-slate-800 border border-slate-300 rounded hover:bg-slate-100 transition-colors"
+              title="Clear highlight color"
+            >
+              Clear
+            </button>
+          </div>
         </div>
 
         <!-- Actions -->
@@ -170,7 +175,7 @@
 </template>
 
 <script setup>
-import { reactive, computed } from 'vue';
+import { reactive, computed, onMounted, onUnmounted } from 'vue';
 import { DRIVER_STATUSES, SIGN_STATUSES } from '../config/statusConfig';
 
 const props = defineProps({
@@ -237,4 +242,18 @@ function handleSubmit() {
     highlightColor: form.highlightColor
   });
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape') {
+    emit('close');
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+});
 </script>

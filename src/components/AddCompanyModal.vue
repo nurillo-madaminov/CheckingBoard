@@ -1,6 +1,10 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+    @click.self="$emit('close')"
+  >
     <div
+      @click.stop
       class="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
       <!-- Modal Header -->
@@ -26,7 +30,7 @@
 
       <!-- Modal Form Body -->
       <form @submit.prevent="handleSubmit" class="p-5 space-y-4">
-        <!-- Company Name -->
+        <!-- Company Name (Preserves exact casing as typed, no forced uppercase) -->
         <div>
           <label class="block text-xs font-bold text-slate-700 mb-1">
             Company Name <span class="text-rose-500">*</span>
@@ -37,7 +41,7 @@
             placeholder="e.g. AK carrier or EVO ELD WENZE LLC"
             required
             autofocus
-            class="w-full text-sm font-semibold uppercase px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            class="w-full text-sm font-semibold px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
           />
         </div>
 
@@ -50,7 +54,7 @@
             v-model="form.note"
             type="text"
             placeholder="e.g. FACTOR, LEADER, Fleet 1, etc."
-            class="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            class="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
           />
           <p class="text-[11px] text-slate-400 mt-1">
             Will display as: <strong class="text-slate-700">{{ previewText }}</strong>
@@ -79,7 +83,7 @@
 </template>
 
 <script setup>
-import { reactive, computed } from 'vue';
+import { reactive, computed, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({
   editingCompany: {
@@ -110,4 +114,18 @@ function handleSubmit() {
     note: form.note.trim()
   });
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape') {
+    emit('close');
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+});
 </script>

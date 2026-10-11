@@ -1,6 +1,10 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+    @click.self="$emit('close')"
+  >
     <div
+      @click.stop
       class="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
     >
       <!-- Header -->
@@ -58,19 +62,22 @@
 
               <!-- Color Controls -->
               <div class="flex items-center gap-2 shrink-0">
-                <label class="text-[11px] text-slate-500 font-medium">Bg:</label>
-                <input
-                  v-model="st.bgColor"
-                  type="color"
-                  class="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
-                />
-
-                <label class="text-[11px] text-slate-500 font-medium ml-1">Text:</label>
-                <input
-                  v-model="st.textColor"
-                  type="color"
-                  class="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
-                />
+                <label class="flex items-center gap-1 text-xs text-slate-500 font-medium cursor-pointer">
+                  <span>Bg:</span>
+                  <input
+                    type="color"
+                    v-model="st.bgColor"
+                    class="w-6 h-6 rounded border border-slate-300 cursor-pointer"
+                  />
+                </label>
+                <label class="flex items-center gap-1 text-xs text-slate-500 font-medium cursor-pointer">
+                  <span>Text:</span>
+                  <input
+                    type="color"
+                    v-model="st.textColor"
+                    class="w-6 h-6 rounded border border-slate-300 cursor-pointer"
+                  />
+                </label>
               </div>
             </div>
           </div>
@@ -79,41 +86,32 @@
         <!-- Sign Statuses -->
         <div>
           <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-3">
-            Sign Dropdown Values
+            Sign Statuses ({{ signStatuses.length }})
           </h4>
+
           <div class="grid grid-cols-2 gap-3">
             <div
-              v-for="s in signStatuses"
-              :key="s.code"
-              class="p-3 rounded-lg border border-slate-200 flex items-center justify-between"
+              v-for="sign in signStatuses"
+              :key="sign.code"
+              class="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-slate-50"
             >
               <div class="flex items-center gap-2">
                 <span
-                  class="px-2 py-0.5 text-xs font-bold rounded border font-mono"
+                  class="px-2 py-0.5 text-xs font-bold font-mono rounded border"
                   :style="{
-                    backgroundColor: s.bgColor,
-                    color: s.textColor,
-                    borderColor: s.borderColor
+                    backgroundColor: sign.bgColor,
+                    color: sign.textColor,
+                    borderColor: sign.borderColor
                   }"
                 >
-                  {{ s.code }}
+                  {{ sign.label }}
                 </span>
-                <span class="text-xs font-semibold text-slate-700">{{ s.label }}</span>
               </div>
-              <div class="flex items-center gap-1.5">
-                <input
-                  v-model="s.bgColor"
-                  type="color"
-                  class="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
-                  title="Background"
-                />
-                <input
-                  v-model="s.textColor"
-                  type="color"
-                  class="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
-                  title="Text color"
-                />
-              </div>
+              <input
+                type="color"
+                v-model="sign.bgColor"
+                class="w-6 h-6 rounded border border-slate-300 cursor-pointer"
+              />
             </div>
           </div>
         </div>
@@ -144,10 +142,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { DRIVER_STATUSES, SIGN_STATUSES } from '../config/statusConfig';
 
-defineEmits(['close']);
+const emit = defineEmits(['close']);
 
 const statuses = ref(DRIVER_STATUSES);
 const signStatuses = ref(SIGN_STATUSES);
@@ -155,4 +153,18 @@ const signStatuses = ref(SIGN_STATUSES);
 function resetDefaults() {
   window.location.reload();
 }
+
+function onKeydown(e) {
+  if (e.key === 'Escape') {
+    emit('close');
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+});
 </script>

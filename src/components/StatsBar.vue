@@ -48,7 +48,7 @@
       </div>
     </div>
 
-    <!-- Right: Tools (Supabase, Config, Export, Import, Reset) -->
+    <!-- Right: Tools (Supabase, Config, Reset) -->
     <div class="flex items-center gap-2">
       <!-- Supabase Database Status / Connect Button -->
       <button
@@ -78,36 +78,11 @@
         <span class="hidden sm:inline">Status Colors</span>
       </button>
 
-      <!-- Excel Export Button -->
-      <button
-        @click="$emit('export-excel')"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-300 transition-colors"
-        title="Export checking board to Excel (.xlsx)"
-      >
-        <span>📊</span>
-        <span class="hidden sm:inline">Export Excel</span>
-      </button>
-
-      <!-- Import Excel / File -->
-      <label
-        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition-colors cursor-pointer"
-        title="Import from Excel (.xlsx or .csv)"
-      >
-        <span>📥</span>
-        <span class="hidden sm:inline">Import</span>
-        <input
-          type="file"
-          accept=".xlsx, .xls, .csv"
-          @change="$emit('import-file', $event)"
-          class="hidden"
-        />
-      </label>
-
       <!-- Reset to Default Data -->
       <button
         @click="$emit('reset-data')"
         class="px-2 py-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 text-xs transition-colors"
-        title="Reset to original sample data"
+        title="Reset to default fleet roster"
       >
         ↺
       </button>
@@ -132,8 +107,6 @@ defineEmits([
   'update:searchQuery',
   'open-config',
   'open-supabase',
-  'export-excel',
-  'import-file',
   'reset-data'
 ]);
 </script>
