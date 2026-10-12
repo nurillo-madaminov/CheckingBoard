@@ -183,6 +183,7 @@ import {
   syncCompaniesOrderToSupabase,
   resetActiveDriversInSupabase,
   broadcastFleetReset,
+  broadcastDriverUpdate,
   subscribeToRealtimeChanges
 } from './services/supabaseService';
 
@@ -383,8 +384,28 @@ function setupRealtime() {
         console.error('Realtime company update error:', e);
       }
     },
-    onDriverChange: async () => {
+    onDriverChange: async (payload) => {
       try {
+        if (payload?.new && payload.new.id) {
+          const row = payload.new;
+          const idx = drivers.value.findIndex(d => d.id === row.id);
+          if (idx !== -1) {
+            drivers.value[idx] = {
+              ...drivers.value[idx],
+              companyId: row.company_id,
+              unit: row.unit || '',
+              name: row.name,
+              sign: row.sign || 'SIGNED',
+              status: row.status || 'READY',
+              notes: row.notes || '',
+              highlightColor: row.highlight_color || '',
+              orderIndex: row.order_index || 1,
+              lastCheckedAt: row.last_checked_at || null
+            };
+            saveDrivers(drivers.value);
+            return;
+          }
+        }
         const remoteDrivers = await fetchDriversFromSupabase();
         if (remoteDrivers) {
           drivers.value = remoteDrivers;
@@ -392,6 +413,14 @@ function setupRealtime() {
         }
       } catch (e) {
         console.error('Realtime driver update error:', e);
+      }
+    },
+    onDriverBroadcast: (driver) => {
+      if (!driver || !driver.id) return;
+      const idx = drivers.value.findIndex(d => d.id === driver.id);
+      if (idx !== -1) {
+        drivers.value[idx] = { ...drivers.value[idx], ...driver };
+        saveDrivers(drivers.value);
       }
     },
     onFleetReset: async () => {
@@ -620,8 +649,10 @@ function updateDriver(updatedDriver) {
     drivers.value[idx] = { ...updatedDriver };
     saveDrivers(drivers.value);
     selectedDriverId.value = updatedDriver.id;
-    if (isSupabaseConnected.value) {
+    if (isSupabaseReady()) {
+      isSupabaseConnected.value = true;
       updateDriverInSupabase(updatedDriver.id, updatedDriver).catch(console.error);
+      broadcastDriverUpdate(updatedDriver);
     }
 
     if (statusChanged) {
@@ -709,9 +740,10 @@ async function handleResetData() {
     drivers.value = updated;
     saveDrivers(updated);
 
-    if (isSupabaseConnected.value) {
+    if (isSupabaseReady()) {
+      isSupabaseConnected.value = true;
       try {
-        await resetActiveDriversInSupabase();
+        await resetActiveDriversInSupabase(updated);
         broadcastFleetReset();
       } catch (err) {
         console.error('Failed to reset drivers in Supabase, using bulk upsert fallback:', err);

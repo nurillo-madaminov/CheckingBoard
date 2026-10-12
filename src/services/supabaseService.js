@@ -147,6 +147,32 @@ export async function updateDriverInSupabase(id, driver) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
+  try {
+    const { data, error } = await supabase
+      .from('drivers')
+      .update({
+        company_id: driver.companyId,
+        unit: driver.unit || '',
+        name: driver.name,
+        sign: driver.sign || 'SIGNED',
+        status: driver.status || 'READY',
+        notes: driver.notes || '',
+        highlight_color: driver.highlightColor || '',
+        order_index: driver.orderIndex || 1,
+        last_checked_at: driver.lastCheckedAt || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (!error) return data;
+    console.warn('Update driver with last_checked_at failed, retrying without it:', error);
+  } catch (err) {
+    console.warn('Exception updating driver with last_checked_at:', err);
+  }
+
+  // Fallback: update without last_checked_at if column does not exist yet
   const { data, error } = await supabase
     .from('drivers')
     .update({
@@ -158,7 +184,6 @@ export async function updateDriverInSupabase(id, driver) {
       notes: driver.notes || '',
       highlight_color: driver.highlightColor || '',
       order_index: driver.orderIndex || 1,
-      last_checked_at: driver.lastCheckedAt || null,
       updated_at: new Date().toISOString()
     })
     .eq('id', id)
@@ -234,24 +259,83 @@ export async function syncCompaniesOrderToSupabase(companies) {
  * Global fleet reset: updates active drivers to READY and last_checked_at to NULL in PostgreSQL
  * Preserves INACTIVE drivers so they stay in HOME/INACTIVE.
  */
-export async function resetActiveDriversInSupabase() {
+export async function resetActiveDriversInSupabase(driversList = null) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  const { data, error } = await supabase
-    .from('drivers')
-    .update({
-      status: 'READY',
-      last_checked_at: null,
-      updated_at: new Date().toISOString()
-    })
-    .neq('status', 'INACTIVE');
+  let updateError = null;
 
-  if (error) {
-    console.error('Error resetting active drivers in Supabase:', error);
-    throw error;
+  // 1. Try updating status to READY and last_checked_at to NULL in PostgreSQL
+  try {
+    const { data, error } = await supabase
+      .from('drivers')
+      .update({
+        status: 'READY',
+        last_checked_at: null,
+        updated_at: new Date().toISOString()
+      })
+      .neq('status', 'INACTIVE');
+
+    if (!error) {
+      console.log('Successfully reset active drivers in Supabase with last_checked_at');
+      return data;
+    }
+    updateError = error;
+    console.warn('Direct update with last_checked_at failed, retrying without last_checked_at:', error);
+  } catch (err) {
+    updateError = err;
+    console.warn('Exception during first reset attempt:', err);
   }
-  return data;
+
+  // 2. Retry without last_checked_at in case column does not exist yet in live Supabase table
+  try {
+    const { data, error } = await supabase
+      .from('drivers')
+      .update({
+        status: 'READY',
+        updated_at: new Date().toISOString()
+      })
+      .neq('status', 'INACTIVE');
+
+    if (!error) {
+      console.log('Successfully reset active drivers in Supabase without last_checked_at');
+      return data;
+    }
+    updateError = error;
+    console.error('Direct update without last_checked_at also failed:', error);
+  } catch (err) {
+    updateError = err;
+    console.error('Exception during second reset attempt:', err);
+  }
+
+  // 3. Fallback: batch upsert active drivers
+  if (driversList && driversList.length > 0) {
+    const activeRows = driversList
+      .filter(d => d.status !== 'INACTIVE')
+      .map((d, index) => ({
+        id: d.id,
+        company_id: d.companyId,
+        unit: d.unit || '',
+        name: d.name,
+        sign: d.sign || 'SIGNED',
+        status: 'READY',
+        notes: d.notes || '',
+        highlight_color: d.highlightColor || '',
+        order_index: d.orderIndex || (index + 1)
+      }));
+
+    const { error } = await supabase
+      .from('drivers')
+      .upsert(activeRows);
+
+    if (error) {
+      console.error('Batch upsert fallback also failed:', error);
+      throw error;
+    }
+    return true;
+  }
+
+  if (updateError) throw updateError;
 }
 
 let activeRealtimeChannel = null;
@@ -265,10 +349,19 @@ export function broadcastFleetReset() {
   });
 }
 
+export function broadcastDriverUpdate(driver) {
+  if (!activeRealtimeChannel || !driver) return;
+  activeRealtimeChannel.send({
+    type: 'broadcast',
+    event: 'driver_updated',
+    payload: { driver }
+  });
+}
+
 /**
  * Setup Realtime Subscription across dispatchers
  */
-export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange, onFleetReset }) {
+export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange, onFleetReset, onDriverBroadcast }) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -286,6 +379,15 @@ export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange, on
       { event: '*', schema: 'public', table: 'drivers' },
       payload => {
         if (onDriverChange) onDriverChange(payload);
+      }
+    )
+    .on(
+      'broadcast',
+      { event: 'driver_updated' },
+      payload => {
+        if (onDriverBroadcast && payload?.payload?.driver) {
+          onDriverBroadcast(payload.payload.driver);
+        }
       }
     )
     .on(

@@ -62,7 +62,9 @@ CREATE POLICY "Allow public update to drivers"
 CREATE POLICY "Allow public delete to drivers"
     ON public.drivers FOR DELETE USING (true);
 
--- 4. Enable Realtime on both tables
+-- 4. Enable Realtime on both tables with FULL replica identity
+ALTER TABLE public.companies REPLICA IDENTITY FULL;
+ALTER TABLE public.drivers REPLICA IDENTITY FULL;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.companies;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.drivers;
 

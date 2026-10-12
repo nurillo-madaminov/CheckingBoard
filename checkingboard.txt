@@ -176,11 +176,13 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
   row hover actions to instantly refresh that driver line back to green.
 - Modifying sign, status, or notes also automatically updates lastCheckedAt.
 - Custom row highlight colors from the 🎨 palette take precedence if applied.
-- Automatic Real-Time Aging Ticker: A 30-second reactive background timer runs
-  continuously in `src/utils/freshness.js`. As time elapses (without needing page reloads
-  or mouse clicks), every driver line actively shifts from Green → Yellow → Orange → Red.
-- Added `last_checked_at TIMESTAMPTZ` column to `supabase_schema.sql` and synced in
-  `supabaseService.js`.
+- Global Real-Time Aging Synchronization: When any dispatcher clicks the "✓" quick check
+  button or updates a driver, the updated `last_checked_at` timestamp is instantly written
+  to Supabase and broadcasted via WebSockets (`driver_updated`). All other dispatchers'
+  screens update that driver in-place in milliseconds without reloading, turning the row
+  Green simultaneously and aging together in real-time across all browser windows.
+- Added `last_checked_at TIMESTAMPTZ` column and `REPLICA IDENTITY FULL` to `supabase_schema.sql`,
+  with resilient fallback updates in `supabaseService.js`.
 
 --------------------------------------------------------------------------------
 9. DAILY US EASTERN TIMEZONE SIGN RESET
