@@ -164,7 +164,70 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
      dispatch workflows directly through cloud/local storage.
 
 --------------------------------------------------------------------------------
-8. GUIDELINE FOR FUTURE CHANGES
+8. DYNAMIC ROW AGING COLORS (WORKFLOW FRESHNESS SYSTEM)
+--------------------------------------------------------------------------------
+- Row background colors are dynamically calculated based on time elapsed since last check
+  (lastCheckedAt timestamp), making dispatch workflow highly visible:
+  * 0h (Newly checked): Fresh Green (rgb(220, 252, 231))
+  * 1h - 2.5h: Aging Yellow (rgb(254, 249, 195))
+  * 2.5h - 4h: Warning Orange (rgb(254, 215, 170))
+  * 4h+ (or never checked): Overdue Red (rgb(254, 226, 226))
+- Hover "✓" Quick Check Button: Dispatchers can click the "✓" button in the driver
+  row hover actions to instantly refresh that driver line back to green.
+- Modifying sign, status, or notes also automatically updates lastCheckedAt.
+- Custom row highlight colors from the 🎨 palette take precedence if applied.
+- Automatic Real-Time Aging Ticker: A 30-second reactive background timer runs
+  continuously in `src/utils/freshness.js`. As time elapses (without needing page reloads
+  or mouse clicks), every driver line actively shifts from Green → Yellow → Orange → Red.
+- Added `last_checked_at TIMESTAMPTZ` column to `supabase_schema.sql` and synced in
+  `supabaseService.js`.
+
+--------------------------------------------------------------------------------
+9. DAILY US EASTERN TIMEZONE SIGN RESET
+--------------------------------------------------------------------------------
+- Whenever the date changes in US Eastern Timezone (EST/EDT, America/New_York),
+  all drivers' sign status automatically resets to 'NO SIGN'.
+- Evaluated on initial page load, after Supabase data fetch, and via a periodic
+  60-second background ticker to handle midnight rollover without reloading.
+
+--------------------------------------------------------------------------------
+10. RESET TO READY (RED) BUTTON
+--------------------------------------------------------------------------------
+- The reset button in the top bar (next to Status Colors) resets all drivers' status
+  to 'READY' and clears `lastCheckedAt` to null.
+- This immediately marks all driver rows in Red (Needs check ASAP / Overdue), giving
+  dispatchers a clean slate for daily check rounds.
+
+--------------------------------------------------------------------------------
+11. NATIVE STATUS DROPDOWN & MULTI-OPEN BUG FIX
+--------------------------------------------------------------------------------
+- Reverted the custom status button/popup to a native HTML `<select>` element.
+- Prevents multiple dropdown popups from lingering or opening simultaneously.
+- When selected: displays only the concise status code (e.g., READY, COVERED, AT PU).
+- While selecting: options show both code and description (e.g., "READY – Ready for Load").
+
+--------------------------------------------------------------------------------
+12. STATUS CHANGE FLOATING TOAST ALERTS ("Events up to date")
+--------------------------------------------------------------------------------
+- Positioned in the top-right corner of the screen (`top-3 right-3`).
+- Clean card design matching the requested screenshot: soft mint green rounded card
+  with a dark green circle checkmark (`✓`), timestamp, and destination tab details.
+- No separate close `✕` icon; the entire alert card is clickable to dismiss immediately
+  (plus 4-second auto-dismissal).
+- Informs the dispatcher which tab the driver was transferred to (e.g.,
+  "Driver [Unit - Name] transferred to [AT PU/DEL] tab"), preventing confusion when
+  rows filter out of current view.
+- Also triggers when new drivers are added to the fleet.
+
+--------------------------------------------------------------------------------
+13. INACTIVE DRIVERS FILTERING
+--------------------------------------------------------------------------------
+- Inactive drivers (status: 'INACTIVE') are automatically hidden from the master
+  'CHECKING BOARD' tab.
+- They remain viewable and manageable under the 'HOME/INACTIVE' tab.
+
+--------------------------------------------------------------------------------
+14. GUIDELINE FOR FUTURE CHANGES
 --------------------------------------------------------------------------------
 Whenever any new feature, column, setting, or database change is added to this
 project, this checkingboard.txt file MUST be updated with the feature description,

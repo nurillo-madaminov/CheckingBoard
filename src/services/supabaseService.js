@@ -55,7 +55,8 @@ export async function fetchDriversFromSupabase() {
     status: row.status || 'READY',
     notes: row.notes || '',
     highlightColor: row.highlight_color || '',
-    orderIndex: row.order_index || 1
+    orderIndex: row.order_index || 1,
+    lastCheckedAt: row.last_checked_at || null
   }));
 }
 
@@ -132,7 +133,8 @@ export async function insertDriverToSupabase(driver) {
       status: driver.status || 'READY',
       notes: driver.notes || '',
       highlight_color: driver.highlightColor || '',
-      order_index: driver.orderIndex || 1
+      order_index: driver.orderIndex || 1,
+      last_checked_at: driver.lastCheckedAt || null
     }])
     .select()
     .single();
@@ -156,6 +158,7 @@ export async function updateDriverInSupabase(id, driver) {
       notes: driver.notes || '',
       highlight_color: driver.highlightColor || '',
       order_index: driver.orderIndex || 1,
+      last_checked_at: driver.lastCheckedAt || null,
       updated_at: new Date().toISOString()
     })
     .eq('id', id)
@@ -195,7 +198,8 @@ export async function syncDriversOrderToSupabase(drivers) {
     status: d.status || 'READY',
     notes: d.notes || '',
     highlight_color: d.highlightColor || '',
-    order_index: index + 1
+    order_index: index + 1,
+    last_checked_at: d.lastCheckedAt || null
   }));
 
   const { error } = await supabase

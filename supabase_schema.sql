@@ -26,9 +26,13 @@ CREATE TABLE IF NOT EXISTS public.drivers (
     notes TEXT DEFAULT '',
     highlight_color TEXT DEFAULT '',
     order_index INTEGER DEFAULT 1,
+    last_checked_at TIMESTAMPTZ DEFAULT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration for existing databases
+ALTER TABLE public.drivers ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ DEFAULT NULL;
 
 -- 3. Enable Row Level Security (RLS) and permit public read/write for dispatchers
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;

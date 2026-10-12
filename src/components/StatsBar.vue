@@ -78,13 +78,14 @@
         <span class="hidden sm:inline">Status Colors</span>
       </button>
 
-      <!-- Reset to Default Data -->
+      <!-- Reset to Ready & Overdue (Red) Button -->
       <button
         @click="$emit('reset-data')"
-        class="px-2 py-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 text-xs transition-colors"
-        title="Reset to default fleet roster"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-xs font-bold transition-all shadow-2xs active:scale-95"
+        title="Reset all drivers to READY and mark all rows RED (needs check ASAP)"
       >
-        ↺
+        <span>↺</span>
+        <span class="hidden md:inline">Reset to Ready (Red)</span>
       </button>
     </div>
   </header>

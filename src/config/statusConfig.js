@@ -156,7 +156,7 @@ export const BOTTOM_TABS = [
     shortLabel: 'All Drivers',
     badgeKey: 'all',
     icon: 'Layers',
-    filterFn: () => true // Shows all drivers
+    filterFn: (driver) => driver.status !== 'INACTIVE' // Inactive drivers hidden from main tab
   },
   {
     id: 'AT_PU_DEL',

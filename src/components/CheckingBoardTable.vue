@@ -300,8 +300,8 @@ const dropTargetCompany = ref(null); // { companyId, position: 'before' | 'after
 function getCompanyDrivers(companyId) {
   let list = props.drivers.filter(d => d.companyId === companyId);
 
-  // Apply tab filter (if not "CHECKING_BOARD")
-  if (props.currentTab.id !== 'CHECKING_BOARD' && props.currentTab.filterFn) {
+  // Apply tab filter (including main tab filter to hide INACTIVE drivers)
+  if (props.currentTab && props.currentTab.filterFn) {
     list = list.filter(props.currentTab.filterFn);
   }
 

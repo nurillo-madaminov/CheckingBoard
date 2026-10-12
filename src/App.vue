@@ -70,6 +70,44 @@
       @close="showSupabaseModal = false"
       @connected="handleSupabaseConnected"
     />
+
+    <!-- Floating Alerts / Toasts (Top-Right Corner, click anywhere on card to close) -->
+    <div class="fixed top-3 right-3 z-50 flex flex-col items-end gap-2 pointer-events-none">
+      <transition-group
+        enter-active-class="transition ease-out duration-200"
+        enter-from-class="transform -translate-y-3 opacity-0 scale-95"
+        enter-to-class="transform translate-y-0 opacity-100 scale-100"
+        leave-active-class="transition ease-in duration-150"
+        leave-from-class="opacity-100 scale-100"
+        leave-to-class="opacity-0 scale-95"
+      >
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          @click="removeToast(toast.id)"
+          class="pointer-events-auto bg-[#eaffea] hover:bg-[#def8e4] border border-emerald-300/90 rounded-2xl shadow-xl px-3.5 py-2.5 flex items-start gap-2.5 min-w-[260px] max-w-sm select-none cursor-pointer transition-all active:scale-95"
+          title="Click to dismiss"
+        >
+          <!-- Green checkmark circle icon -->
+          <div class="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-2xs">
+            ✓
+          </div>
+
+          <!-- Alert content -->
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-bold text-emerald-950 tracking-tight leading-snug">
+                {{ toast.title || 'Events up to date' }}
+              </span>
+              <span class="text-[10px] text-emerald-600 font-mono font-medium shrink-0">{{ toast.time }}</span>
+            </div>
+            <div v-if="toast.message" class="text-xs font-semibold text-emerald-800 mt-0.5 leading-snug">
+              {{ toast.message }}
+            </div>
+          </div>
+        </div>
+      </transition-group>
+    </div>
   </div>
 </template>
 
@@ -84,6 +122,7 @@ import StatusConfigModal from './components/StatusConfigModal.vue';
 import SupabaseConnectModal from './components/SupabaseConnectModal.vue';
 
 import { BOTTOM_TABS } from './config/statusConfig';
+import { checkAndResetSignStatusIfNeeded } from './utils/timezone';
 import {
   loadCompanies,
   saveCompanies,
@@ -115,6 +154,27 @@ const selectedDriverId = ref('');
 const isSupabaseConnected = ref(isSupabaseReady());
 const showSupabaseModal = ref(false);
 let realtimeChannel = null;
+
+// Toast / Alert Notification System
+const toasts = ref([]);
+function showToast({ title = 'Events up to date', message = '' }) {
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const id = `toast-${Date.now()}-${Math.random()}`;
+  toasts.value.push({ id, title, message, time: timeStr });
+  setTimeout(() => {
+    removeToast(id);
+  }, 4000);
+}
+
+function removeToast(id) {
+  toasts.value = toasts.value.filter(t => t.id !== id);
+}
+
+function getDestinationTab(status) {
+  const tab = BOTTOM_TABS.find(t => t.id !== 'CHECKING_BOARD' && t.filterFn({ status }));
+  return tab ? tab.label : 'CHECKING BOARD';
+}
 
 // Modals
 const showCompanyModal = ref(false);
@@ -211,6 +271,17 @@ async function loadDataFromSupabase() {
     if (remoteDrivers && remoteDrivers.length > 0) {
       drivers.value = remoteDrivers;
       saveDrivers(remoteDrivers);
+      // Verify date rollover for remote drivers
+      checkAndResetSignStatusIfNeeded(
+        remoteDrivers,
+        (updated) => {
+          drivers.value = updated;
+          saveDrivers(updated);
+        },
+        (updated) => {
+          syncDriversOrderToSupabase(updated).catch(console.error);
+        }
+      );
     }
     isSupabaseConnected.value = true;
   } catch (err) {
@@ -259,6 +330,46 @@ function handleSupabaseConnected() {
 }
 
 onMounted(() => {
+  // Check and perform US Eastern midnight sign reset
+  const resetDrivers = checkAndResetSignStatusIfNeeded(
+    drivers.value,
+    (updated) => {
+      drivers.value = updated;
+      saveDrivers(updated);
+    },
+    (updated) => {
+      if (isSupabaseConnected.value) {
+        syncDriversOrderToSupabase(updated).catch(console.error);
+      }
+    }
+  );
+  if (resetDrivers) {
+    drivers.value = resetDrivers;
+  }
+
+  // Periodic check (every 60 seconds) for date rollover while app is open
+  setInterval(() => {
+    const res = checkAndResetSignStatusIfNeeded(
+      drivers.value,
+      (updated) => {
+        drivers.value = updated;
+        saveDrivers(updated);
+      },
+      (updated) => {
+        if (isSupabaseConnected.value) {
+          syncDriversOrderToSupabase(updated).catch(console.error);
+        }
+      }
+    );
+    if (res) {
+      drivers.value = res;
+      showToast({
+        title: 'Daily Reset (EST)',
+        message: 'All drivers sign status reset to NO SIGN for the new day'
+      });
+    }
+  }, 60000);
+
   if (isSupabaseReady()) {
     loadDataFromSupabase();
     setupRealtime();
@@ -368,6 +479,8 @@ function closeDriverModal() {
 }
 
 function saveDriver(driverData) {
+  let driverName = driverData.name;
+  let driverStatus = driverData.status || 'READY';
   if (driverData.id) {
     const idx = drivers.value.findIndex(d => d.id === driverData.id);
     if (idx !== -1) {
@@ -386,12 +499,19 @@ function saveDriver(driverData) {
       status: driverData.status || 'READY',
       notes: driverData.notes || '',
       highlightColor: driverData.highlightColor || '',
-      orderIndex: drivers.value.length + 1
+      orderIndex: drivers.value.length + 1,
+      lastCheckedAt: new Date().toISOString()
     };
     drivers.value.push(newDriver);
+    driverName = newDriver.unit ? `${newDriver.unit} - ${newDriver.name}` : newDriver.name;
+    driverStatus = newDriver.status;
     if (isSupabaseConnected.value) {
       insertDriverToSupabase(newDriver).catch(console.error);
     }
+    showToast({
+      title: 'Events up to date',
+      message: `${driverName} added to [${getDestinationTab(driverStatus)}] tab`
+    });
   }
   saveDrivers(drivers.value);
   closeDriverModal();
@@ -400,11 +520,25 @@ function saveDriver(driverData) {
 function updateDriver(updatedDriver) {
   const idx = drivers.value.findIndex(d => d.id === updatedDriver.id);
   if (idx !== -1) {
+    const oldDriver = drivers.value[idx];
+    const statusChanged = oldDriver.status !== updatedDriver.status;
+
     drivers.value[idx] = { ...updatedDriver };
     saveDrivers(drivers.value);
     selectedDriverId.value = updatedDriver.id;
     if (isSupabaseConnected.value) {
       updateDriverInSupabase(updatedDriver.id, updatedDriver).catch(console.error);
+    }
+
+    if (statusChanged) {
+      const destTab = getDestinationTab(updatedDriver.status);
+      const driverLabel = updatedDriver.unit
+        ? `${updatedDriver.unit} - ${updatedDriver.name}`
+        : updatedDriver.name;
+      showToast({
+        title: 'Events up to date',
+        message: `${driverLabel} transferred to [${destTab}] tab`
+      });
     }
   }
 }
@@ -463,10 +597,21 @@ function deleteDriver(driverId) {
 }
 
 function handleResetData() {
-  if (confirm('Reset all data to default fleet roster? Any manual edits will be overwritten.')) {
-    const data = resetToDefaults();
-    companies.value = data.companies;
-    drivers.value = data.drivers;
+  if (confirm('Reset all drivers status to READY and mark all rows RED (needs check ASAP)?')) {
+    const updated = drivers.value.map(d => ({
+      ...d,
+      status: 'READY',
+      lastCheckedAt: null
+    }));
+    drivers.value = updated;
+    saveDrivers(updated);
+    if (isSupabaseConnected.value) {
+      syncDriversOrderToSupabase(updated).catch(console.error);
+    }
+    showToast({
+      title: 'Events up to date',
+      message: 'All drivers reset to READY (All lines set to Red / Needs Check)'
+    });
   }
 }
 </script>

@@ -9,7 +9,7 @@
     @click="$emit('select-row', driver.id)"
     :style="rowCustomStyle"
     :class="[
-      'transition-colors duration-150 group text-sm select-text relative cursor-default',
+      'transition-colors duration-200 group text-sm select-text relative cursor-default',
       isDragging ? 'opacity-30 bg-slate-300' : '',
       isActive ? 'is-active-row z-20' : 'hover:brightness-95',
       showColorPicker ? 'z-50 relative' : '',
@@ -22,15 +22,20 @@
       @mousedown="canDragDriver = true"
       @mouseup="canDragDriver = false"
       @mouseleave="canDragDriver = false"
-      :title="`Drag to reorder line #${orderIndex}`"
+      :title="`Drag to reorder line #${orderIndex} (${freshness.label})`"
     >
       <div class="flex items-center justify-center gap-1">
-        <span class="text-[10px] text-slate-400 group-hover:text-slate-600 opacity-60 group-hover:opacity-100">⠿</span>
+        <!-- Freshness Indicator Dot: Green when fresh, Yellow/Orange aging, Red when overdue -->
+        <span
+          class="w-1.5 h-1.5 rounded-full shrink-0 shadow-2xs"
+          :style="{ backgroundColor: freshness.borderColor }"
+          :title="freshness.label"
+        ></span>
         <span>{{ orderIndex }}</span>
       </div>
     </td>
 
-    <!-- Column 1: DRIVER (122 - Driver Name) - Fixed 320px Width (overflow-visible for color picker) -->
+    <!-- Column 1: DRIVER (122 - Driver Name) - Fixed 320px Width -->
     <td class="w-80 min-w-[320px] max-w-[320px] px-4 py-2 text-slate-800 font-medium overflow-visible relative">
       <div class="flex items-center justify-between gap-2">
         <div class="flex items-center gap-2 truncate">
@@ -53,7 +58,7 @@
             <span v-if="driver.unit" class="text-slate-400 font-bold shrink-0">-</span>
             <span
               class="truncate select-text"
-              :title="driver.name"
+              :title="`${driver.name} - ${freshness.label}`"
             >
               {{ driver.name }}
             </span>
@@ -62,6 +67,15 @@
 
         <!-- Quick row actions (hover only, shrink-0) -->
         <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+          <!-- Quick Mark Checked Button (Turns line green instantly) -->
+          <button
+            @click.stop="markAsChecked"
+            title="Mark driver as checked now (turns line green)"
+            class="p-1 text-slate-400 hover:text-emerald-600 rounded hover:bg-emerald-100/70 transition-colors text-xs font-bold"
+          >
+            ✓
+          </button>
+
           <!-- Highlight Color Picker -->
           <div class="relative flex items-center">
             <button
@@ -149,7 +163,7 @@
       </div>
     </td>
 
-    <!-- Column 3: STATUS DROPDOWN - Fixed 190px Width -->
+    <!-- Column 3: STATUS DROPDOWN - Fixed 190px Width (Only code when selected, code + description while choosing) -->
     <td class="w-48 min-w-[190px] max-w-[190px] px-3 py-1.5 overflow-hidden">
       <div class="relative">
         <select
@@ -161,7 +175,8 @@
             color: currentStatusConfig.textColor,
             borderColor: currentStatusConfig.borderColor
           }"
-          class="w-full text-xs font-bold px-2.5 py-1 rounded-md border appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 shadow-2xs tracking-wide transition-all"
+          class="w-full text-xs font-bold px-2.5 py-1.5 rounded-md border appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 shadow-2xs font-mono tracking-wide transition-all"
+          :title="`Current status: ${driver.status} - ${currentStatusConfig.label}`"
         >
           <option
             v-for="st in statusOptions"
@@ -169,7 +184,7 @@
             :value="st.code"
             class="bg-white text-slate-900 font-sans"
           >
-            {{ st.code }} - {{ st.label }}
+            {{ st.code }} – {{ st.label }}
           </option>
         </select>
         <span
@@ -204,6 +219,7 @@ import {
   getStatusConfig,
   getSignConfig
 } from '../config/statusConfig';
+import { getFreshnessInfo } from '../utils/freshness';
 
 const props = defineProps({
   driver: {
@@ -251,6 +267,11 @@ const signOptions = SIGN_STATUSES;
 const currentStatusConfig = computed(() => getStatusConfig(props.driver.status));
 const currentSignConfig = computed(() => getSignConfig(props.driver.sign));
 
+// Dynamic aging freshness calculation based on elapsed time since last checked
+const freshness = computed(() => {
+  return getFreshnessInfo(props.driver.lastCheckedAt);
+});
+
 const highlightPresets = [
   { name: 'Yellow', hex: '#FEF08A' },
   { name: 'Orange', hex: '#FED7AA' },
@@ -260,24 +281,18 @@ const highlightPresets = [
   { name: 'Purple', hex: '#E9D5FF' }
 ];
 
-// Row background styling based on active state, highlight color, and status
+// Row background styling: DYNAMIC AGING COLOR (Green -> Yellow -> Orange -> Red over 4 hours)
 const rowCustomStyle = computed(() => {
-  const cfg = currentStatusConfig.value;
-
+  // If user explicitly highlighted the row with 🎨 palette, user color takes precedence
   if (props.driver.highlightColor) {
     return {
       backgroundColor: props.isActive ? props.driver.highlightColor + '70' : props.driver.highlightColor + '40'
     };
   }
 
-  if (props.isActive) {
-    return {
-      backgroundColor: cfg.activeBgColor || cfg.rowBgColor || '#FEF9C3'
-    };
-  }
-
+  // Dynamic workflow freshness color (NOT tied to status)
   return {
-    backgroundColor: cfg.rowBgColor || '#FFFFFF'
+    backgroundColor: freshness.value.bgColor
   };
 });
 
@@ -285,15 +300,35 @@ function onSelectLine() {
   emit('select-row', props.driver.id);
 }
 
+function markAsChecked() {
+  onSelectLine();
+  justChanged.value = true;
+  emit('update', {
+    ...props.driver,
+    lastCheckedAt: new Date().toISOString()
+  });
+  setTimeout(() => {
+    justChanged.value = false;
+  }, 800);
+}
+
 function onSignChange(newSign) {
   onSelectLine();
-  emit('update', { ...props.driver, sign: newSign });
+  emit('update', {
+    ...props.driver,
+    sign: newSign,
+    lastCheckedAt: new Date().toISOString()
+  });
 }
 
 function onStatusChange(newStatus) {
   onSelectLine();
   justChanged.value = true;
-  emit('update', { ...props.driver, status: newStatus });
+  emit('update', {
+    ...props.driver,
+    status: newStatus,
+    lastCheckedAt: new Date().toISOString()
+  });
   setTimeout(() => {
     justChanged.value = false;
   }, 1000);
@@ -301,7 +336,11 @@ function onStatusChange(newStatus) {
 
 function saveNotes() {
   if (localNotes.value !== (props.driver.notes || '')) {
-    emit('update', { ...props.driver, notes: localNotes.value });
+    emit('update', {
+      ...props.driver,
+      notes: localNotes.value,
+      lastCheckedAt: new Date().toISOString()
+    });
   }
 }
 
@@ -311,22 +350,33 @@ function toggleColorPicker() {
 
 function setHighlightColor(color) {
   showColorPicker.value = false;
-  emit('update', { ...props.driver, highlightColor: color });
+  emit('update', {
+    ...props.driver,
+    highlightColor: color
+  });
 }
 
-// Global click outside to close color picker
+// Global click outside to close popups
 function handleDocumentClick(e) {
   if (showColorPicker.value && rowRef.value && !rowRef.value.contains(e.target)) {
     showColorPicker.value = false;
   }
 }
 
+function handleKeydown(e) {
+  if (e.key === 'Escape') {
+    showColorPicker.value = false;
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', handleDocumentClick);
+  window.addEventListener('keydown', handleKeydown);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', handleDocumentClick);
+  window.removeEventListener('keydown', handleKeydown);
 });
 
 // Drag & Drop Handlers - DRIVER CAN ONLY BE DRAGGED FROM ORDER NUMBER
