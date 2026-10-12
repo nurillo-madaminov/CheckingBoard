@@ -231,9 +231,44 @@ export async function syncCompaniesOrderToSupabase(companies) {
 }
 
 /**
+ * Global fleet reset: updates active drivers to READY and last_checked_at to NULL in PostgreSQL
+ * Preserves INACTIVE drivers so they stay in HOME/INACTIVE.
+ */
+export async function resetActiveDriversInSupabase() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('drivers')
+    .update({
+      status: 'READY',
+      last_checked_at: null,
+      updated_at: new Date().toISOString()
+    })
+    .neq('status', 'INACTIVE');
+
+  if (error) {
+    console.error('Error resetting active drivers in Supabase:', error);
+    throw error;
+  }
+  return data;
+}
+
+let activeRealtimeChannel = null;
+
+export function broadcastFleetReset() {
+  if (!activeRealtimeChannel) return;
+  activeRealtimeChannel.send({
+    type: 'broadcast',
+    event: 'fleet_reset',
+    payload: { timestamp: Date.now() }
+  });
+}
+
+/**
  * Setup Realtime Subscription across dispatchers
  */
-export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange }) {
+export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange, onFleetReset }) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -253,9 +288,17 @@ export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange }) 
         if (onDriverChange) onDriverChange(payload);
       }
     )
+    .on(
+      'broadcast',
+      { event: 'fleet_reset' },
+      payload => {
+        if (onFleetReset) onFleetReset(payload);
+      }
+    )
     .subscribe((status) => {
       console.log('Supabase Realtime status:', status);
     });
 
+  activeRealtimeChannel = channel;
   return channel;
 }

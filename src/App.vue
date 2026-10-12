@@ -85,23 +85,62 @@
           v-for="toast in toasts"
           :key="toast.id"
           @click="removeToast(toast.id)"
-          class="pointer-events-auto bg-[#eaffea] hover:bg-[#def8e4] border border-emerald-300/90 rounded-2xl shadow-xl px-3.5 py-2.5 flex items-start gap-2.5 min-w-[260px] max-w-sm select-none cursor-pointer transition-all active:scale-95"
+          :style="{
+            backgroundColor: toast.bgColor,
+            borderColor: toast.borderColor
+          }"
+          class="pointer-events-auto border rounded-2xl shadow-xl px-3.5 py-2 flex items-center gap-3 w-80 min-w-80 max-w-80 h-16 min-h-16 max-h-16 select-none cursor-pointer transition-all active:scale-95 hover:brightness-95"
           title="Click to dismiss"
         >
-          <!-- Green checkmark circle icon -->
-          <div class="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-2xs">
+          <!-- Status icon badge with matching accent color -->
+          <div
+            :style="{ backgroundColor: toast.iconBg }"
+            class="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-2xs"
+          >
             ✓
           </div>
 
-          <!-- Alert content -->
+          <!-- Alert content with uniform dimensions and prominent destination badge -->
           <div class="flex-1 min-w-0">
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-sm font-bold text-emerald-950 tracking-tight leading-snug">
-                {{ toast.title || 'Events up to date' }}
+            <div class="flex items-center justify-between gap-1">
+              <span
+                class="text-xs font-extrabold tracking-tight truncate"
+                :style="{ color: toast.textColor }"
+              >
+                {{ toast.driverName || toast.title }}
               </span>
-              <span class="text-[10px] text-emerald-600 font-mono font-medium shrink-0">{{ toast.time }}</span>
+              <span
+                class="text-[10px] font-mono font-medium shrink-0 opacity-75"
+                :style="{ color: toast.textColor }"
+              >
+                {{ toast.time }}
+              </span>
             </div>
-            <div v-if="toast.message" class="text-xs font-semibold text-emerald-800 mt-0.5 leading-snug">
+
+            <!-- Obvious & easy-to-understand transferred location badge -->
+            <div v-if="toast.destTab" class="flex items-center gap-1.5 mt-0.5 truncate">
+              <span
+                class="text-[10px] font-bold uppercase tracking-wider opacity-85 shrink-0"
+                :style="{ color: toast.textColor }"
+              >
+                Transferred to:
+              </span>
+              <span
+                class="px-2 py-0.5 rounded text-[10px] font-black tracking-wide uppercase border bg-white/90 shadow-2xs truncate"
+                :style="{
+                  borderColor: toast.borderColor,
+                  color: toast.textColor
+                }"
+              >
+                {{ toast.destTab }}
+              </span>
+            </div>
+            <div
+              v-else-if="toast.message"
+              class="text-xs font-semibold mt-0.5 truncate"
+              :style="{ color: toast.textColor }"
+              :title="toast.message"
+            >
               {{ toast.message }}
             </div>
           </div>
@@ -121,7 +160,7 @@ import AddDriverModal from './components/AddDriverModal.vue';
 import StatusConfigModal from './components/StatusConfigModal.vue';
 import SupabaseConnectModal from './components/SupabaseConnectModal.vue';
 
-import { BOTTOM_TABS } from './config/statusConfig';
+import { BOTTOM_TABS, getStatusConfig } from './config/statusConfig';
 import { checkAndResetSignStatusIfNeeded } from './utils/timezone';
 import {
   loadCompanies,
@@ -142,6 +181,8 @@ import {
   deleteDriverFromSupabase,
   syncDriversOrderToSupabase,
   syncCompaniesOrderToSupabase,
+  resetActiveDriversInSupabase,
+  broadcastFleetReset,
   subscribeToRealtimeChanges
 } from './services/supabaseService';
 
@@ -157,11 +198,46 @@ let realtimeChannel = null;
 
 // Toast / Alert Notification System
 const toasts = ref([]);
-function showToast({ title = 'Events up to date', message = '' }) {
+function showToast({
+  title = 'Events up to date',
+  message = '',
+  status = null,
+  driverName = '',
+  destTab = ''
+}) {
   const now = new Date();
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const id = `toast-${Date.now()}-${Math.random()}`;
-  toasts.value.push({ id, title, message, time: timeStr });
+
+  let bgColor = '#eaffea';
+  let borderColor = '#86efac';
+  let textColor = '#065f46';
+  let iconBg = '#047857';
+
+  if (status) {
+    const config = getStatusConfig(status);
+    if (config) {
+      bgColor = config.bgColor || bgColor;
+      borderColor = config.borderColor || borderColor;
+      textColor = config.textColor || textColor;
+      iconBg = config.color || config.textColor || iconBg;
+    }
+  }
+
+  toasts.value.push({
+    id,
+    title,
+    message,
+    driverName,
+    destTab,
+    status,
+    time: timeStr,
+    bgColor,
+    borderColor,
+    textColor,
+    iconBg
+  });
+
   setTimeout(() => {
     removeToast(id);
   }, 4000);
@@ -316,6 +392,21 @@ function setupRealtime() {
         }
       } catch (e) {
         console.error('Realtime driver update error:', e);
+      }
+    },
+    onFleetReset: async () => {
+      try {
+        const remoteDrivers = await fetchDriversFromSupabase();
+        if (remoteDrivers) {
+          drivers.value = remoteDrivers;
+          saveDrivers(remoteDrivers);
+          showToast({
+            title: 'Events up to date',
+            message: 'Fleet reset to READY by another dispatcher'
+          });
+        }
+      } catch (e) {
+        console.error('Realtime fleet reset error:', e);
       }
     }
   });
@@ -509,7 +600,10 @@ function saveDriver(driverData) {
       insertDriverToSupabase(newDriver).catch(console.error);
     }
     showToast({
-      title: 'Events up to date',
+      title: 'Driver Added',
+      driverName: driverName,
+      destTab: getDestinationTab(driverStatus),
+      status: driverStatus,
       message: `${driverName} added to [${getDestinationTab(driverStatus)}] tab`
     });
   }
@@ -536,7 +630,10 @@ function updateDriver(updatedDriver) {
         ? `${updatedDriver.unit} - ${updatedDriver.name}`
         : updatedDriver.name;
       showToast({
-        title: 'Events up to date',
+        title: 'Status Updated',
+        driverName: driverLabel,
+        destTab: destTab,
+        status: updatedDriver.status,
         message: `${driverLabel} transferred to [${destTab}] tab`
       });
     }
@@ -596,21 +693,35 @@ function deleteDriver(driverId) {
   }
 }
 
-function handleResetData() {
-  if (confirm('Reset all drivers status to READY and mark all rows RED (needs check ASAP)?')) {
-    const updated = drivers.value.map(d => ({
-      ...d,
-      status: 'READY',
-      lastCheckedAt: null
-    }));
+async function handleResetData() {
+  if (confirm('Reset active drivers status to READY and mark rows RED (needs check ASAP)? Inactive drivers will remain inactive.')) {
+    const updated = drivers.value.map(d => {
+      // Inactive drivers stay in inactive tab and are not reset or shown in main tab
+      if (d.status === 'INACTIVE') {
+        return d;
+      }
+      return {
+        ...d,
+        status: 'READY',
+        lastCheckedAt: null
+      };
+    });
     drivers.value = updated;
     saveDrivers(updated);
+
     if (isSupabaseConnected.value) {
-      syncDriversOrderToSupabase(updated).catch(console.error);
+      try {
+        await resetActiveDriversInSupabase();
+        broadcastFleetReset();
+      } catch (err) {
+        console.error('Failed to reset drivers in Supabase, using bulk upsert fallback:', err);
+        syncDriversOrderToSupabase(updated).catch(console.error);
+      }
     }
+
     showToast({
       title: 'Events up to date',
-      message: 'All drivers reset to READY (All lines set to Red / Needs Check)'
+      message: 'Active drivers reset to READY (Inactive unchanged)'
     });
   }
 }

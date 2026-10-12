@@ -191,12 +191,21 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
   60-second background ticker to handle midnight rollover without reloading.
 
 --------------------------------------------------------------------------------
-10. RESET TO READY (RED) BUTTON
+10. RESET TO READY (RED) BUTTON & GLOBAL REAL-TIME SYNCHRONIZATION
 --------------------------------------------------------------------------------
-- The reset button in the top bar (next to Status Colors) resets all drivers' status
+- The reset button in the top bar (next to Status Colors) resets all active drivers' status
   to 'READY' and clears `lastCheckedAt` to null.
-- This immediately marks all driver rows in Red (Needs check ASAP / Overdue), giving
-  dispatchers a clean slate for daily check rounds.
+- Global Real-Time Sync Across All Users: When any dispatcher clicks the reset button,
+  it executes a PostgreSQL update on Supabase (`UPDATE drivers SET status = 'READY', last_checked_at = NULL WHERE status != 'INACTIVE'`)
+  and sends a WebSockets Realtime broadcast (`fleet_reset`).
+  All other active dispatchers automatically receive the event, re-fetch the fleet,
+  update their rows to READY and Red simultaneously, and receive a toast alert:
+  "Fleet reset to READY by another dispatcher".
+- INACTIVE Drivers Excluded: Drivers with `status: 'INACTIVE'` are deliberately preserved
+  as INACTIVE across the entire database. They remain strictly in the HOME/INACTIVE tab
+  and do NOT get shown on the main CHECKING BOARD tab.
+- This immediately marks all active driver rows in Red (Needs check ASAP / Overdue), giving
+  dispatchers a synchronized clean slate for daily check rounds without altering inactive profiles.
 
 --------------------------------------------------------------------------------
 11. NATIVE STATUS DROPDOWN & MULTI-OPEN BUG FIX
@@ -207,16 +216,24 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
 - While selecting: options show both code and description (e.g., "READY – Ready for Load").
 
 --------------------------------------------------------------------------------
-12. STATUS CHANGE FLOATING TOAST ALERTS ("Events up to date")
+12. STATUS CHANGE FLOATING TOAST ALERTS & COLOR MATCHING
 --------------------------------------------------------------------------------
 - Positioned in the top-right corner of the screen (`top-3 right-3`).
-- Clean card design matching the requested screenshot: soft mint green rounded card
-  with a dark green circle checkmark (`✓`), timestamp, and destination tab details.
+- Dynamic Status Color Matching: The background, border, text, and checkmark circle of
+  each alert dynamically match the status color being set:
+  * AT PU / AT DEL: Soft yellow background (`#FEF08A` / `#FEF9C3`), amber border and text
+  * GOING DEL: Soft blue background (`#DBEAFE`), blue border and text
+  * READY: Soft green background (`#DCFCE7`), green border and text
+  * COVERED: Soft amber background (`#FDE68A`), amber border and text
+  * SHOP: Soft orange background (`#FFEDD5`), orange border and text
+  * HOME: Soft red background (`#FEE2E2`), red border and text
+- Prominent Transfer Location Display: The destination tab is displayed with maximum
+  clarity inside a high-contrast bordered badge (e.g., `Transferred to: [ AT PU/DEL ]`),
+  making it immediately obvious and easy to identify where the row has moved.
+- Identical Fixed Size: Every alert card has the exact same dimensions (`320px` width
+  by `64px` height, `w-80 h-16`) with clean text truncation, ensuring uniform geometry.
 - No separate close `✕` icon; the entire alert card is clickable to dismiss immediately
   (plus 4-second auto-dismissal).
-- Informs the dispatcher which tab the driver was transferred to (e.g.,
-  "Driver [Unit - Name] transferred to [AT PU/DEL] tab"), preventing confusion when
-  rows filter out of current view.
 - Also triggers when new drivers are added to the fleet.
 
 --------------------------------------------------------------------------------
