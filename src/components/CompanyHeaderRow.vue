@@ -57,10 +57,13 @@
           </span>
         </div>
 
-        <!-- Right: Actions (+ Add Driver, Edit, Delete) - SHOWN ONLY ON MAIN CHECKINGBOARD TAB -->
+        <!-- Right: Actions (+ Add Driver, Edit, Delete) - SHOWN ONLY ON MAIN CHECKINGBOARD TAB;
+             adding and deleting are manager-only -->
+
         <div v-if="showActions" class="flex items-center gap-2">
-          <!-- + Add Driver Button -->
+          <!-- + Add Driver Button (managers only) -->
           <button
+            v-if="canManageFleet"
             @click="$emit('add-driver', company)"
             class="flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs hover:shadow transition-all active:scale-95"
             title="Add a new driver to this company"
@@ -78,8 +81,9 @@
             ✏️
           </button>
 
-          <!-- Delete Company -->
+          <!-- Delete Company (managers only) -->
           <button
+            v-if="canManageFleet"
             @click="$emit('delete-company', company.id)"
             class="p-1 text-slate-300 hover:text-rose-400 hover:bg-slate-600 rounded transition-colors text-xs"
             title="Delete company"
@@ -115,6 +119,10 @@ const props = defineProps({
   showActions: {
     type: Boolean,
     default: true
+  },
+  canManageFleet: {
+    type: Boolean,
+    default: false
   },
   isDragging: {
     type: Boolean,

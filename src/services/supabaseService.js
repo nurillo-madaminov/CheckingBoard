@@ -1,53 +1,48 @@
-import { getSupabaseClient } from './supabaseClient';
-
-export function isSupabaseReady() {
-  return getSupabaseClient() !== null;
-}
+import { supabase } from './supabaseClient';
 
 /**
- * Fetch all companies from Supabase
+ * FLEET DATA SERVICE (companies & drivers in the shared Supabase database)
+ *
+ * Row Level Security scopes every query to the signed-in dispatcher's team, and
+ * team_id defaults to that team on insert, so no team id is passed from here.
  */
-export async function fetchCompaniesFromSupabase() {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
 
-  const { data, error } = await supabase
-    .from('companies')
-    .select('*')
-    .order('order_index', { ascending: true });
+const PAGE_SIZE = 1000; // Supabase returns at most 1000 rows per request
 
-  if (error) {
-    console.error('Error fetching companies from Supabase:', error);
-    throw error;
+// Fetch every row of a query, page by page
+export async function fetchAllRows(buildQuery) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
   }
+  return rows;
+}
 
-  return (data || []).map(row => ({
+export function newId(prefix) {
+  const rand = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+    : Math.random().toString(36).slice(2, 14);
+  return `${prefix}-${Date.now()}-${rand}`;
+}
+
+// ---------- row mappers ----------
+export function mapCompanyRow(row) {
+  return {
     id: row.id,
+    teamId: row.team_id,
     name: row.name,
     note: row.note || '',
     order: row.order_index || 1
-  }));
+  };
 }
 
-/**
- * Fetch all drivers from Supabase
- */
-export async function fetchDriversFromSupabase() {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from('drivers')
-    .select('*')
-    .order('order_index', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching drivers from Supabase:', error);
-    throw error;
-  }
-
-  return (data || []).map(row => ({
+export function mapDriverRow(row) {
+  return {
     id: row.id,
+    teamId: row.team_id,
     companyId: row.company_id,
     unit: row.unit || '',
     name: row.name,
@@ -57,164 +52,11 @@ export async function fetchDriversFromSupabase() {
     highlightColor: row.highlight_color || '',
     orderIndex: row.order_index || 1,
     lastCheckedAt: row.last_checked_at || null
-  }));
+  };
 }
 
-/**
- * Company CRUD
- */
-export async function insertCompanyToSupabase(company) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from('companies')
-    .insert([{
-      id: company.id,
-      name: company.name,
-      note: company.note || '',
-      order_index: company.order || 1
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-export async function updateCompanyInSupabase(id, company) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from('companies')
-    .update({
-      name: company.name,
-      note: company.note || '',
-      order_index: company.order || 1,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteCompanyFromSupabase(id) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { error } = await supabase
-    .from('companies')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
-  return true;
-}
-
-/**
- * Driver CRUD
- */
-export async function insertDriverToSupabase(driver) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from('drivers')
-    .insert([{
-      id: driver.id,
-      company_id: driver.companyId,
-      unit: driver.unit || '',
-      name: driver.name,
-      sign: driver.sign || 'SIGNED',
-      status: driver.status || 'READY',
-      notes: driver.notes || '',
-      highlight_color: driver.highlightColor || '',
-      order_index: driver.orderIndex || 1,
-      last_checked_at: driver.lastCheckedAt || null
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-export async function updateDriverInSupabase(id, driver) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  try {
-    const { data, error } = await supabase
-      .from('drivers')
-      .update({
-        company_id: driver.companyId,
-        unit: driver.unit || '',
-        name: driver.name,
-        sign: driver.sign || 'SIGNED',
-        status: driver.status || 'READY',
-        notes: driver.notes || '',
-        highlight_color: driver.highlightColor || '',
-        order_index: driver.orderIndex || 1,
-        last_checked_at: driver.lastCheckedAt || null,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (!error) return data;
-    console.warn('Update driver with last_checked_at failed, retrying without it:', error);
-  } catch (err) {
-    console.warn('Exception updating driver with last_checked_at:', err);
-  }
-
-  // Fallback: update without last_checked_at if column does not exist yet
-  const { data, error } = await supabase
-    .from('drivers')
-    .update({
-      company_id: driver.companyId,
-      unit: driver.unit || '',
-      name: driver.name,
-      sign: driver.sign || 'SIGNED',
-      status: driver.status || 'READY',
-      notes: driver.notes || '',
-      highlight_color: driver.highlightColor || '',
-      order_index: driver.orderIndex || 1,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteDriverFromSupabase(id) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { error } = await supabase
-    .from('drivers')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
-  return true;
-}
-
-/**
- * Batch update driver ordering
- */
-export async function syncDriversOrderToSupabase(drivers) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const updates = drivers.map((d, index) => ({
+function driverToRow(d) {
+  return {
     id: d.id,
     company_id: d.companyId,
     unit: d.unit || '',
@@ -223,184 +65,156 @@ export async function syncDriversOrderToSupabase(drivers) {
     status: d.status || 'READY',
     notes: d.notes || '',
     highlight_color: d.highlightColor || '',
-    order_index: index + 1,
+    order_index: d.orderIndex || 1,
     last_checked_at: d.lastCheckedAt || null
-  }));
-
-  const { error } = await supabase
-    .from('drivers')
-    .upsert(updates);
-
-  if (error) console.error('Error updating driver order in Supabase:', error);
+  };
 }
 
-/**
- * Batch update company ordering
- */
-export async function syncCompaniesOrderToSupabase(companies) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const updates = companies.map((c, index) => ({
+function companyToRow(c) {
+  return {
     id: c.id,
     name: c.name,
     note: c.note || '',
-    order_index: index + 1
+    order_index: c.order || 1
+  };
+}
+
+// ---------- reads ----------
+export async function fetchCompanies() {
+  const rows = await fetchAllRows(() =>
+    supabase.from('companies').select('*').order('order_index', { ascending: true }).order('id')
+  );
+  return rows.map(mapCompanyRow);
+}
+
+export async function fetchDrivers() {
+  const rows = await fetchAllRows(() =>
+    supabase.from('drivers').select('*').order('order_index', { ascending: true }).order('id')
+  );
+  return rows.map(mapDriverRow);
+}
+
+async function check(promise) {
+  const { error } = await promise;
+  if (error) throw error;
+}
+
+// ---------- companies ----------
+export function insertCompany(company) {
+  return check(supabase.from('companies').insert([companyToRow(company)]));
+}
+
+export function updateCompany(company) {
+  const { id, ...fields } = companyToRow(company);
+  return check(supabase.from('companies').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', id));
+}
+
+export function deleteCompany(id) {
+  return check(supabase.from('companies').delete().eq('id', id));
+}
+
+// Save the order of only the companies whose position changed
+// (an update, not an upsert: staff may reorder but not add companies)
+export function saveCompanyOrder(changedCompanies) {
+  if (!changedCompanies.length) return Promise.resolve();
+  return check(supabase.rpc('save_company_order', {
+    p_rows: changedCompanies.map(c => ({ id: c.id, order_index: c.order || 1 }))
   }));
+}
 
-  const { error } = await supabase
-    .from('companies')
-    .upsert(updates);
+// ---------- drivers ----------
+export function insertDriver(driver) {
+  return check(supabase.from('drivers').insert([driverToRow(driver)]));
+}
 
-  if (error) console.error('Error updating company order in Supabase:', error);
+export function updateDriver(driver) {
+  const { id, ...fields } = driverToRow(driver);
+  return check(supabase.from('drivers').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', id));
+}
+
+export function deleteDriver(id) {
+  return check(supabase.from('drivers').delete().eq('id', id));
+}
+
+// Save order / company of only the drivers that moved
+export function saveDriverOrder(changedDrivers) {
+  if (!changedDrivers.length) return Promise.resolve();
+  return check(supabase.rpc('save_driver_order', {
+    p_rows: changedDrivers.map(d => ({ id: d.id, order_index: d.orderIndex || 1, company_id: d.companyId }))
+  }));
 }
 
 /**
- * Global fleet reset: updates active drivers to READY and last_checked_at to NULL in PostgreSQL
- * Preserves INACTIVE drivers so they stay in HOME/INACTIVE.
+ * Fleet reset: every non-INACTIVE driver in the team -> READY, never checked (red)
  */
-export async function resetActiveDriversInSupabase(driversList = null) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  let updateError = null;
-
-  // 1. Try updating status to READY and last_checked_at to NULL in PostgreSQL
-  try {
-    const { data, error } = await supabase
+export function resetActiveDrivers() {
+  return check(
+    supabase
       .from('drivers')
-      .update({
-        status: 'READY',
-        last_checked_at: null,
-        updated_at: new Date().toISOString()
-      })
-      .neq('status', 'INACTIVE');
-
-    if (!error) {
-      console.log('Successfully reset active drivers in Supabase with last_checked_at');
-      return data;
-    }
-    updateError = error;
-    console.warn('Direct update with last_checked_at failed, retrying without last_checked_at:', error);
-  } catch (err) {
-    updateError = err;
-    console.warn('Exception during first reset attempt:', err);
-  }
-
-  // 2. Retry without last_checked_at in case column does not exist yet in live Supabase table
-  try {
-    const { data, error } = await supabase
-      .from('drivers')
-      .update({
-        status: 'READY',
-        updated_at: new Date().toISOString()
-      })
-      .neq('status', 'INACTIVE');
-
-    if (!error) {
-      console.log('Successfully reset active drivers in Supabase without last_checked_at');
-      return data;
-    }
-    updateError = error;
-    console.error('Direct update without last_checked_at also failed:', error);
-  } catch (err) {
-    updateError = err;
-    console.error('Exception during second reset attempt:', err);
-  }
-
-  // 3. Fallback: batch upsert active drivers
-  if (driversList && driversList.length > 0) {
-    const activeRows = driversList
-      .filter(d => d.status !== 'INACTIVE')
-      .map((d, index) => ({
-        id: d.id,
-        company_id: d.companyId,
-        unit: d.unit || '',
-        name: d.name,
-        sign: d.sign || 'SIGNED',
-        status: 'READY',
-        notes: d.notes || '',
-        highlight_color: d.highlightColor || '',
-        order_index: d.orderIndex || (index + 1)
-      }));
-
-    const { error } = await supabase
-      .from('drivers')
-      .upsert(activeRows);
-
-    if (error) {
-      console.error('Batch upsert fallback also failed:', error);
-      throw error;
-    }
-    return true;
-  }
-
-  if (updateError) throw updateError;
+      .update({ status: 'READY', last_checked_at: null, updated_at: new Date().toISOString() })
+      .neq('status', 'INACTIVE')
+  );
 }
 
-let activeRealtimeChannel = null;
+/**
+ * Daily US Eastern sign reset, decided by the database (once per team per day).
+ * Returns true when this call performed the reset.
+ */
+export async function runDailySignReset() {
+  const { data, error } = await supabase.rpc('run_daily_sign_reset');
+  if (error) throw error;
+  return data === true;
+}
+
+// ---------- realtime ----------
+let activeChannel = null;
 
 export function broadcastFleetReset() {
-  if (!activeRealtimeChannel) return;
-  activeRealtimeChannel.send({
+  if (!activeChannel) return;
+  activeChannel.send({
     type: 'broadcast',
     event: 'fleet_reset',
     payload: { timestamp: Date.now() }
   });
 }
 
-export function broadcastDriverUpdate(driver) {
-  if (!activeRealtimeChannel || !driver) return;
-  activeRealtimeChannel.send({
-    type: 'broadcast',
-    event: 'driver_updated',
-    payload: { driver }
-  });
-}
-
 /**
- * Setup Realtime Subscription across dispatchers
+ * Live sync between dispatchers of the same team. postgres_changes events are
+ * already limited by RLS; the team check below is an extra guard.
  */
-export function subscribeToRealtimeChanges({ onCompanyChange, onDriverChange, onFleetReset, onDriverBroadcast }) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
+export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChange, onFleetReset, onStatus }) {
+  if (!supabase || !teamId) return null;
+  unsubscribeFromRealtime();
 
-  const channel = supabase
-    .channel('checkingboard-channel')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'companies' },
-      payload => {
-        if (onCompanyChange) onCompanyChange(payload);
-      }
-    )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'drivers' },
-      payload => {
-        if (onDriverChange) onDriverChange(payload);
-      }
-    )
-    .on(
-      'broadcast',
-      { event: 'driver_updated' },
-      payload => {
-        if (onDriverBroadcast && payload?.payload?.driver) {
-          onDriverBroadcast(payload.payload.driver);
-        }
-      }
-    )
-    .on(
-      'broadcast',
-      { event: 'fleet_reset' },
-      payload => {
-        if (onFleetReset) onFleetReset(payload);
-      }
-    )
-    .subscribe((status) => {
-      console.log('Supabase Realtime status:', status);
+  const isOwnTeam = (payload) => {
+    const rowTeam = payload?.new?.team_id || payload?.old?.team_id;
+    return !rowTeam || rowTeam === teamId;
+  };
+
+  activeChannel = supabase
+    .channel(`checkingboard-${teamId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'companies' }, payload => {
+      if (onCompanyChange && isOwnTeam(payload)) onCompanyChange(payload);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, payload => {
+      if (onDriverChange && isOwnTeam(payload)) onDriverChange(payload);
+    })
+    .on('broadcast', { event: 'fleet_reset' }, payload => {
+      if (onFleetReset) onFleetReset(payload);
+    })
+    .subscribe(status => {
+      if (onStatus) onStatus(status);
     });
 
-  activeRealtimeChannel = channel;
-  return channel;
+  return activeChannel;
+}
+
+export function unsubscribeFromRealtime() {
+  if (!activeChannel) return;
+  try {
+    supabase.removeChannel(activeChannel);
+  } catch (e) {
+    console.warn('Realtime unsubscribe error:', e);
+  }
+  activeChannel = null;
 }

@@ -99,7 +99,9 @@
             <td colspan="5" class="text-center py-12 text-slate-400">
               <div class="text-4xl mb-2">📋</div>
               <div class="font-bold text-base text-slate-600">No Companies Found</div>
-              <p class="text-xs text-slate-500 mt-1">Click "+ Add Company" above to get started.</p>
+              <p class="text-xs text-slate-500 mt-1">
+                {{ canManageFleet ? 'Click "+ Add Company" above to get started.' : 'A manager adds companies and drivers.' }}
+              </p>
             </td>
           </tr>
 
@@ -125,6 +127,7 @@
               :driverCount="getCompanyDrivers(company.id).length"
               :isCollapsed="isCompanyCollapsed(company.id)"
               :showActions="currentTab.id === 'CHECKING_BOARD'"
+              :canManageFleet="canManageFleet"
               :isDragging="draggedCompanyId === company.id"
               @toggle-collapse="toggleCompanyCollapse(company.id)"
               @add-driver="$emit('add-driver', company)"
@@ -171,10 +174,12 @@
                   :orderIndex="getRowIndex(driver.id)"
                   :isActive="selectedDriverId === driver.id"
                   :isDragging="draggedDriverId === driver.id"
+                  :canDelete="canManageFleet"
                   @select-row="$emit('select-driver', $event)"
                   @update="$emit('update-driver', $event)"
                   @delete="$emit('delete-driver', $event)"
                   @edit="$emit('edit-driver', $event)"
+                  @log-action="$emit('log-action', $event)"
                   @drag-start="handleDragStart"
                   @drag-end="handleDragEnd"
                   @row-dragover="handleRowDragOver"
@@ -204,6 +209,7 @@
                   <span v-if="currentTab.id === 'CHECKING_BOARD'">
                     No drivers yet in {{ company.name }}.
                     <button
+                      v-if="canManageFleet"
                       @click="$emit('add-driver', company)"
                       class="text-emerald-700 font-bold hover:underline ml-1"
                     >
@@ -248,6 +254,11 @@ const props = defineProps({
   selectedDriverId: {
     type: String,
     default: ''
+  },
+  // Managers add / delete drivers and companies; staff only work the board
+  canManageFleet: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -261,7 +272,8 @@ const emit = defineEmits([
   'select-driver',
   'reorder-driver',
   'reorder-company',
-  'move-driver-to-company'
+  'move-driver-to-company',
+  'log-action'
 ]);
 
 // Collapsed state: CLOSED (COLLAPSED) BY DEFAULT as requested

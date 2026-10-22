@@ -12,7 +12,7 @@
       'transition-colors duration-200 group text-sm select-text relative cursor-default',
       isDragging ? 'opacity-30 bg-slate-300' : '',
       isActive ? 'is-active-row z-20' : 'hover:brightness-95',
-      showColorPicker ? 'z-50 relative' : '',
+      (showColorPicker || showActionMenu) ? 'z-50 relative' : '',
       justChanged ? 'animate-pulse' : ''
     ]"
   >
@@ -76,6 +76,63 @@
             ✓
           </button>
 
+          <!-- Dispatch Quick Actions Menu (Shift, Cycle, Fix Log, Break, Connect) -->
+          <div class="relative flex items-center">
+            <button
+              @click.stop="toggleActionMenu"
+              title="Log dispatch activity (Shift, Cycle, Fix Log, Break, Connect)"
+              class="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-100/70 transition-colors text-xs font-bold"
+            >
+              ⚡
+            </button>
+
+            <!-- Floating Actions Dropdown -->
+            <div
+              v-if="showActionMenu"
+              @click.stop
+              class="absolute left-0 top-8 z-50 bg-white p-1.5 rounded-lg shadow-2xl border border-slate-300 flex flex-col gap-1 min-w-[145px] text-left"
+            >
+              <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2 py-0.5 border-b border-slate-100">
+                Log Activity
+              </div>
+              <button
+                @click.stop="triggerAction('SHIFT')"
+                class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded transition-colors text-left"
+              >
+                <span>🌅</span>
+                <span>Open Shift</span>
+              </button>
+              <button
+                @click.stop="triggerAction('CYCLE')"
+                class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded transition-colors text-left"
+              >
+                <span>🔄</span>
+                <span>Open Cycle</span>
+              </button>
+              <button
+                @click.stop="triggerAction('FIX_LOG')"
+                class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-amber-50 hover:text-amber-700 rounded transition-colors text-left"
+              >
+                <span>🛠️</span>
+                <span>Fix Log</span>
+              </button>
+              <button
+                @click.stop="triggerAction('BREAK')"
+                class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded transition-colors text-left"
+              >
+                <span>☕</span>
+                <span>Take Break</span>
+              </button>
+              <button
+                @click.stop="triggerAction('DRIVER_CONNECTED')"
+                class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-teal-50 hover:text-teal-700 rounded transition-colors text-left"
+              >
+                <span>🔗</span>
+                <span>Connect</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Highlight Color Picker -->
           <div class="relative flex items-center">
             <button
@@ -119,8 +176,9 @@
             ✏️
           </button>
 
-          <!-- Delete Driver -->
+          <!-- Delete Driver (managers only) -->
           <button
+            v-if="canDelete"
             @click.stop="$emit('delete', driver.id)"
             title="Delete driver"
             class="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-slate-200/60 transition-colors text-xs"
@@ -237,6 +295,10 @@ const props = defineProps({
   isDragging: {
     type: Boolean,
     default: false
+  },
+  canDelete: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -248,12 +310,14 @@ const emit = defineEmits([
   'drag-start',
   'drag-end',
   'row-dragover',
-  'row-drop'
+  'row-drop',
+  'log-action'
 ]);
 
 const rowRef = ref(null);
 const localNotes = ref(props.driver.notes || '');
 const showColorPicker = ref(false);
+const showActionMenu = ref(false);
 const justChanged = ref(false);
 const canDragDriver = ref(false);
 
@@ -338,14 +402,28 @@ function saveNotes() {
   if (localNotes.value !== (props.driver.notes || '')) {
     emit('update', {
       ...props.driver,
-      notes: localNotes.value,
-      lastCheckedAt: new Date().toISOString()
+      notes: localNotes.value
     });
   }
 }
 
 function toggleColorPicker() {
+  showActionMenu.value = false;
   showColorPicker.value = !showColorPicker.value;
+}
+
+function toggleActionMenu() {
+  showColorPicker.value = false;
+  showActionMenu.value = !showActionMenu.value;
+}
+
+function triggerAction(actionType) {
+  showActionMenu.value = false;
+  onSelectLine();
+  emit('log-action', {
+    actionType,
+    driver: props.driver
+  });
 }
 
 function setHighlightColor(color) {
@@ -361,11 +439,15 @@ function handleDocumentClick(e) {
   if (showColorPicker.value && rowRef.value && !rowRef.value.contains(e.target)) {
     showColorPicker.value = false;
   }
+  if (showActionMenu.value && rowRef.value && !rowRef.value.contains(e.target)) {
+    showActionMenu.value = false;
+  }
 }
 
 function handleKeydown(e) {
   if (e.key === 'Escape') {
     showColorPicker.value = false;
+    showActionMenu.value = false;
   }
 }
 

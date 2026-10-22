@@ -1,0 +1,7 @@
+-- ==============================================================================
+-- SUPERSEDED - nothing to run here.
+-- ==============================================================================
+-- Everything this file used to do (teams, staff profiles, immutable activity log,
+-- RLS, realtime) is now part of supabase_schema.sql, which is the only script to
+-- run in the Supabase SQL Editor. This file can be deleted.
+-- ==============================================================================

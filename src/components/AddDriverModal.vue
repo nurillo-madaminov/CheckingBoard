@@ -114,7 +114,7 @@
         <!-- Notes Input -->
         <div>
           <label class="block text-xs font-bold text-slate-700 mb-1">
-            Notes <span class="text-slate-400 font-normal">(Optional dispatch comment)</span>
+            Notes <span class="text-slate-400 font-normal">(Optional notes)</span>
           </label>
           <input
             v-model="form.notes"

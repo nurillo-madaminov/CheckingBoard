@@ -20,68 +20,59 @@ an Excel workbook tab experience pinned at the bottom of the window.
 - Build Tool & Dev Server: Vite 6 (ultra-fast HMR and building)
 - Styling: Tailwind CSS 3 + PostCSS + Autoprefixer
 - Icons: Native Unicode & SVG icons
-- Backend API: Node.js + Express.js + CORS (REST API server in server/server.js)
-- Runtime: Node.js v24 LTS + npm
+- Database, Accounts & Live Sync: Supabase (PostgreSQL + Supabase Auth + Realtime)
+  - one shared database for every team, configured only through env variables
+- Runtime: Node.js v24 LTS + npm (build tooling only; there is no app server)
 - One-Click Launcher: start.bat (Windows batch script)
 - GitHub Repository: https://github.com/nurillo-madaminov/CheckingBoard.git (branch: main)
 
 --------------------------------------------------------------------------------
-3. DATABASE ARCHITECTURE & STORAGE (SUPABASE PLAN B IMPLEMENTED)
+3. DATABASE ARCHITECTURE: ONE SHARED SUPABASE DATABASE
 --------------------------------------------------------------------------------
-Primary Cloud Database: Supabase (PostgreSQL with Realtime WebSockets)
-SQL Migration & Seed File: supabase_schema.sql
+There are no solo / team modes and no in-app database connection screen.
+Every team and every dispatcher works in ONE Supabase database, and nothing
+operational (companies, drivers, notes, statuses, activities, accounts) is stored
+in the browser.
 
-A. SUPABASE TABLES:
-1. public.companies:
-   - id TEXT PRIMARY KEY (e.g., "comp-1")
-   - name TEXT NOT NULL
-   - note TEXT DEFAULT ''
-   - order_index INTEGER DEFAULT 1
-   - created_at TIMESTAMPTZ DEFAULT NOW()
-   - updated_at TIMESTAMPTZ DEFAULT NOW()
+A. CONFIGURATION (ONCE, ON THE HOSTING PLATFORM):
+- The frontend reads the database ONLY from build-time env variables, set where the
+  frontend is built/deployed (Vercel, Netlify, etc.), then rebuilt:
+    VITE_SUPABASE_URL=https://your-project.supabase.co
+    VITE_SUPABASE_ANON_KEY=your-anon-public-key
+- If they are missing, the app shows a "not connected to its database" setup
+  message instead of the sign-in screen.
+- src/services/supabaseClient.js creates the single client from these variables.
 
-2. public.drivers:
-   - id TEXT PRIMARY KEY (e.g., "drv-1")
-   - company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE
-   - unit TEXT DEFAULT '' (e.g., "122", "898", "27092")
-   - name TEXT NOT NULL (e.g., "MOUZ TEDLA", "JEAN JOACHIM")
-   - sign TEXT DEFAULT 'SIGNED'
-   - status TEXT DEFAULT 'READY'
-   - notes TEXT DEFAULT ''
-   - highlight_color TEXT DEFAULT ''
-   - order_index INTEGER DEFAULT 1
-   - created_at TIMESTAMPTZ DEFAULT NOW()
-   - updated_at TIMESTAMPTZ DEFAULT NOW()
+B. HOW A TEAM WORKS:
+1. A manager opens the app and clicks "Create a Team" (team name, their name,
+   username, password). They become that team's manager and are signed in.
+2. The manager opens Team & Staff Management and creates logins (username +
+   password) for each staff member, then gives them those credentials.
+3. Staff sign in with that username and password. Everyone in the team sees and
+   edits the same fleet; every action is recorded in the same database.
 
-B. REALTIME WEBSOCKETS REPLICATION:
-   - Enabled via: ALTER PUBLICATION supabase_realtime ADD TABLE companies, drivers;
-   - Whenever any dispatcher changes a driver's status or moves lines, Supabase
-     broadcasts the change live. All connected dispatchers receive the update
-     instantly without refreshing their browser.
+C. DATA ISOLATION BETWEEN TEAMS:
+- companies, drivers and activities carry team_id. Row Level Security (RLS) in the
+  database limits every read and write to the signed-in user's team; team_id is
+  filled in automatically on insert. Anonymous visitors can read nothing.
+- Deactivated users lose access immediately (RLS) and cannot sign in (Auth ban).
 
-C. FLEET ROSTER POPULATION (10 Carrier Companies & 194 Drivers):
-   The database and storage services are pre-populated with the company roster:
-   1. INFINITY LOGISTEX LLC (7 drivers)
-   2. RUZBEK LOGISTICS INC (4 drivers)
-   3. AK CARRIER LLC [FACTOR] (8 drivers)
-   4. AK CARRIER LLC [LEADER] (47 drivers)
-   5. UMAR INC LLC [TT ELD] (43 drivers)
-   6. UZB TRUCKING LLC [LEADER ELD] (33 drivers)
-   7. UZB TRUCKING LLC [FACTOR ELD] (15 drivers)
-   8. CARGO KINGS INC (12 drivers)
-   9. BIG LIFE LOGISTICS (24 drivers, including unit numbers 898, 142, 27092, etc.)
-   10. MKM GLOBAL INC (1 driver)
+D. LIVE SYNC:
+- Supabase Realtime postgres_changes on companies and drivers: any check, sign,
+  status change, note or reorder by one dispatcher appears on teammates' screens.
+  A broadcast (fleet_reset) adds the "Fleet reset to READY by another dispatcher"
+  toast. The top bar shows the team name with a green dot while live.
 
-D. PERSISTENCE & CREDENTIAL LAYERS:
-1. Supabase Client & Service:
-   - src/services/supabaseClient.js: reads from .env or browser localStorage.
-   - src/services/supabaseService.js: full CRUD + postgres_changes real-time channel
-     + syncDriversOrderToSupabase + syncCompaniesOrderToSupabase.
-   - src/components/SupabaseConnectModal.vue: in-app modal to test connection,
-     input Project URL & anon key, or disconnect.
-2. Offline / Local Fallback:
-   - Browser LocalStorage (src/services/storageService.js) ensures the app
-     continues to work seamlessly offline if Supabase is disconnected.
+E. BROWSER STORAGE:
+- Only the Supabase login session (so you stay signed in) and your personal bottom
+  tab order ('checkingboard_tabs_order_v1') are kept in the browser.
+
+F. EXISTING FLEET (10 carrier companies / 196+ drivers):
+- Data created before team accounts existed belongs to the legacy team 'team-1'.
+  After creating your team in the app, move it into your team once in the SQL
+  Editor:  SELECT public.claim_legacy_fleet('your-username');
+- supabase_schema.sql no longer seeds drivers (the old seed was out of date and
+  re-running it would have overwritten live edits).
 
 --------------------------------------------------------------------------------
 4. TABLE STRUCTURE & LOCKED COLUMNS
@@ -117,7 +108,10 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
   all companies in a single click.
 - Main Tab vs Category Tabs Action Isolation:
   * In the main "CHECKING BOARD" tab: companies display action buttons (+ Add Driver,
-    ✏️ Edit, 🗑️ Delete).
+    ✏️ Edit, 🗑️ Delete). + Add Company, + Add Driver and 🗑️ Delete (company and
+    driver) are shown to MANAGERS ONLY; staff can still edit, reorder, change sign /
+    status / notes and use the ⚡ action buttons. The database enforces this too
+    (INSERT / DELETE policies on companies and drivers require a manager).
   * In all category tabs (AT PU/DEL, READY, etc.): all company action buttons are
     hidden to avoid accidental modifications outside the master view.
 
@@ -137,7 +131,7 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
    - The first tab (CHECKING BOARD) is fixed and locked in position 0.
    - All other tabs (tabs 1..N) can be reordered via drag-and-drop with vertical blue
      insertion line markers.
-   - Custom tab order is persisted in localStorage ('checkingboard_tabs_order_v1').
+   - Custom tab order is a per-browser view preference ('checkingboard_tabs_order_v1').
 
 --------------------------------------------------------------------------------
 7. UI/UX FIXES & REFINEMENTS
@@ -157,11 +151,11 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
    - Removed forced CSS uppercase transformation in Add Company and Add Driver modals.
    - Preserves exact typed letter casing (lower, upper, mixed case).
 5. Modal Dismissal (Esc & Click Outside):
-   - All modals (Add Company, Add Driver, Status Config, Supabase Connect) close
+   - All modals (Add Company, Add Driver, Status Config, Team & Staff) close
      when pressing the Esc key and when clicking anywhere outside the modal dialog card.
 6. Removed Excel Import / Export:
    - Removed "Export Excel" and "Import" buttons and logic as requested to streamline
-     dispatch workflows directly through cloud/local storage.
+     dispatch workflows directly through the shared database.
 
 --------------------------------------------------------------------------------
 8. DYNAMIC ROW AGING COLORS (WORKFLOW FRESHNESS SYSTEM)
@@ -174,7 +168,9 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
   * 4h+ (or never checked): Overdue Red (rgb(254, 226, 226))
 - Hover "✓" Quick Check Button: Dispatchers can click the "✓" button in the driver
   row hover actions to instantly refresh that driver line back to green.
-- Modifying sign, status, or notes also automatically updates lastCheckedAt.
+- Modifying sign or status also automatically updates lastCheckedAt.
+- Note Editing Does NOT Mark Checked: Editing or adding notes does NOT update lastCheckedAt,
+  preventing notes changes from unintentionally turning a driver row green.
 - Custom row highlight colors from the 🎨 palette take precedence if applied.
 - Global Real-Time Aging Synchronization: When any dispatcher clicks the "✓" quick check
   button or updates a driver, the updated `last_checked_at` timestamp is instantly written
@@ -189,8 +185,10 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
 --------------------------------------------------------------------------------
 - Whenever the date changes in US Eastern Timezone (EST/EDT, America/New_York),
   all drivers' sign status automatically resets to 'NO SIGN'.
-- Evaluated on initial page load, after Supabase data fetch, and via a periodic
-  60-second background ticker to handle midnight rollover without reloading.
+- Decided by the database (public.run_daily_sign_reset), once per team per US
+  Eastern day: the first dispatcher online after midnight triggers it and teammates
+  receive the change live. Checked on sign-in and every 60 seconds.
+- teams.last_sign_reset_date stores the last reset date (no browser storage).
 
 --------------------------------------------------------------------------------
 10. RESET TO READY (RED) BUTTON & GLOBAL REAL-TIME SYNCHRONIZATION
@@ -239,14 +237,257 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
 - Also triggers when new drivers are added to the fleet.
 
 --------------------------------------------------------------------------------
-13. INACTIVE DRIVERS FILTERING
+13. INACTIVE DRIVERS FILTERING & COUNT EXCLUSION
 --------------------------------------------------------------------------------
 - Inactive drivers (status: 'INACTIVE') are automatically hidden from the master
   'CHECKING BOARD' tab.
-- They remain viewable and manageable under the 'HOME/INACTIVE' tab.
+- Driver Counts Exclude Inactive Drivers: The master 'CHECKING BOARD' bottom tab badge
+  count and the bottom bar legend ('Total: X drivers') now strictly exclude inactive
+  drivers, counting only active fleet drivers.
+- Inactive drivers remain viewable, countable, and manageable under the 'HOME/INACTIVE' tab.
 
 --------------------------------------------------------------------------------
-14. GUIDELINE FOR FUTURE CHANGES
+14. ACTIVITY TRACKING, STAFF ACCOUNTABILITY & HISTORICAL DATA INTEGRITY
+--------------------------------------------------------------------------------
+CheckingBoard features a dedicated Activity Log and Manager Analytics dashboard
+providing end-to-end staff accountability, immutable audit trails, and permanent
+historical data preservation across operational driver/company deletions.
+
+A. REQUIRED ACTIVITY RECORD SCHEMA & HISTORICAL SNAPSHOTS:
+Each activity log record contains:
+- `id`: Unique activity identifier (e.g., "act-1740000000-xyz").
+- `staff_user_id`: ID of the authenticated staff member who performed the action.
+  Derived strictly from the server/session authentication context (never trusted from
+  arbitrary frontend request payloads).
+- `staff_name_snapshot`: Staff member's display name at the time of the action.
+  Preserved permanently so that historical records remain understandable even if
+  the staff member's display name changes later.
+- `driver_id`: Nullable foreign key referencing public.drivers(id) with ON DELETE SET NULL.
+- `driver_name_snapshot`: Historical driver name and unit (e.g. "101 - Pervez Adnan")
+  captured at the time of action.
+- `company_id`: Nullable foreign key referencing public.companies(id) with ON DELETE SET NULL.
+- `company_name_snapshot`: Carrier group name at the time of action.
+- `action_type`: Type of activity performed:
+  * SHIFT: Open shift
+  * CYCLE: Open cycle / cycle check
+  * FIX_LOG: Fix driver logs
+  * BREAK: Driver rest / break
+  * TRANSFER: Transfer driver to another company
+  * STATUS_CHANGE: Change driver operational status (e.g. READY -> AT PU)
+  * QUICK_CHECK: Hover ✓ quick check (refresh line to green)
+  * DRIVER_CONNECTED: Driver mobile / TT ELD connection
+  * DRIVER_ADDED: New driver added to fleet
+  * DRIVER_DELETED: Operational driver deletion audit log
+  * COMPANY_DELETED: Operational company deletion audit log
+- `action_at`: UTC timestamp of the activity.
+- `extra_note`: Optional context or notes.
+- `created_at`: Database record creation timestamp.
+
+B. ACTIVITY LOG TABLE INTERFACE & ROLE-BASED ACCESS CONTROL (RBAC):
+The Activity Log page displays the 6 required columns:
+| Order | Staff Member | Driver Name | Action Date and Time | Action | Extra Note |
+1. Role-based visibility:
+   - Managers: View all team-wide activity logs. Can filter by staff member,
+     driver, action type, company (active or deleted, with suggestions), and date
+     range (US Eastern day boundaries).
+   - Staff Members: Can view ONLY their own activity records. Cannot view other
+     dispatchers' activities.
+2. Historical Name Fallback:
+   - Displays historical staff snapshot name with fallback to "Unknown Historical Actor"
+     for legacy records.
+   - Displays historical driver name with a prominent "Deleted" badge if the driver
+     is no longer in the active operational fleet.
+
+C. HISTORICAL RETENTION & DELETION RESILIENCE:
+- When a manager deletes a driver:
+  * Operational driver is removed from the active fleet view.
+  * All historical activity records previously associated with that driver are
+    100% PRESERVED.
+  * driver_id is set to NULL via ON DELETE SET NULL; driver_name_snapshot and
+    company_name_snapshot remain permanently intact.
+  * Deleting a driver never decreases manager activity totals or distorts reports.
+- When a manager deletes a company:
+  * Operational company is removed from active fleet.
+  * Associated activity logs are NOT cascade-deleted.
+  * Old activities remain searchable and understandable.
+- Staff Account Deactivation:
+  * Deactivating or removing a staff account does NOT delete their historical logs.
+  * Historical display name snapshot remains visible in all past logs.
+
+D. ROW-LEVEL SECURITY (RLS) POLICIES ON SUPABASE (supabase_schema.sql):
+- Helpers: public.current_team_id() and public.is_team_manager() read the signed-in
+  user's active profile (security definer).
+- public.teams / public.staff_profiles: members read their own team / roster only.
+  No direct writes: accounts change only through the functions in section 15.
+- public.companies / public.drivers: members read and write rows of their own team;
+  a driver can only point at a company of the same team.
+- public.activities:
+  * SELECT: staff read only their own records; managers read their whole team.
+  * INSERT: a BEFORE INSERT trigger (activities_stamp_actor) overwrites
+    staff_user_id, staff_name_snapshot, team_id, action_at and created_at from the
+    session, and takes driver/company name snapshots from the live rows, so a
+    client cannot forge who did what or when.
+  * UPDATE / DELETE: no policy and no privilege. The audit trail is immutable.
+
+E. MANAGER DASHBOARD & ANALYTICS RULES:
+- Aggregates activity metrics directly from immutable activity records rather than
+  current fleet state.
+- Metrics include:
+  * Total activities per staff member.
+  * Shift, break, cycle, Fix Log, driver connection, status change, and transfer counts.
+  * Daily, weekly, and monthly activity timeline totals.
+  * Custom date-range reports.
+- Timezone handling:
+  * Timestamps are stored in UTC.
+  * Daily/weekly/monthly grouping boundaries are calculated using the configured
+    reporting timezone (America/New_York EST/EDT).
+
+F. DATABASE SETUP SCRIPT:
+- Single script: `supabase_schema.sql` (supabase_activities_migration.sql is
+  superseded and empty). Run it in Supabase Dashboard -> SQL Editor. It:
+  1. Creates or upgrades teams, staff_profiles, companies, drivers, activities
+     in place, keeping all existing rows; foreign keys use ON DELETE SET NULL.
+  2. Removes the old plain-text password column and deactivates the old demo
+     profiles (Manager Sarah / Staff John / Staff Alice), whose names stay on
+     historical activity records.
+  3. Replaces the old "public" policies with the team RLS above.
+  4. Adds the account / daily-reset / claim functions and Realtime publication.
+- Safe to run again after future updates.
+
+G. AUTOMATED TESTING:
+- Test suite: `tests/supabase_accountability.test.js`, run against a real Supabase
+  TEST project that has supabase_schema.sql applied (each run creates new logins):
+    TEST_SUPABASE_URL=... TEST_SUPABASE_ANON_KEY=... npm test
+  Without those variables the suite is skipped.
+- 13 tests covering the original required scenarios on the real database:
+  1. Staff A actor accountability
+  2. Staff B actor accountability
+  3. Prevention of forged actor IDs
+  4. Manager staff filtering & staff own-record restriction
+  5. Immutable staff name snapshots across account display name changes
+  6. Driver deletion activity preservation
+  7. Company deletion activity preservation
+  8. Searchability of deleted entities
+  9. Staff account deactivation resilience
+  10. Dashboard statistics accuracy across operational deletions
+  11. Rejection of direct PUT/DELETE API requests (403 Forbidden)
+  12. Existing CheckingBoard functionality regression testing
+  13. Database migration backward compatibility & unknown actor safety
+
+--------------------------------------------------------------------------------
+15. TEAM REGISTRATION, USERNAME/PASSWORD AUTH & MANAGER STAFF PROMOTION
+--------------------------------------------------------------------------------
+A. ACCOUNTS ARE SUPABASE AUTH USERS:
+- Passwords are bcrypt-hashed by Supabase Auth; the app never stores them.
+- Usernames: 3-32 characters (letters, numbers, dot, dash, underscore), unique
+  across the database. Username "nick" signs in as the internal address
+  nick@checkingboard.internal (never emailed; the app maps it automatically).
+- Accounts are created only by database functions, so public sign-up must be OFF:
+  Supabase -> Authentication -> Sign In / Providers -> "Allow new users to sign up".
+
+B. SIGN IN SCREEN (`src/components/LoginView.vue`):
+- Username + Password + "Sign In to Dispatch". No demo accounts.
+- Clear messages for wrong credentials and deactivated accounts.
+- Sessions persist across reloads until "Sign Out".
+
+C. "CREATE A TEAM" (CREATOR BECOMES MANAGER): rpc register_team
+- Inputs: Team name, Manager full name, Username, Password (min. 6 characters).
+- Creates the team, the login and a manager profile, then signs the creator in.
+
+D. TEAM & STAFF MANAGEMENT MODAL (`StaffSwitchModal.vue`, top bar user pill):
+- Everyone: team roster, update own display name (rpc update_my_display_name;
+  past activity snapshots keep the old name), Log Out.
+- Managers only (each is a database function that checks the caller is an active
+  manager of the same team):
+  * "Create Staff Account" (rpc create_staff_account): name, username, initial
+    password, role (staff / manager).
+  * "⭐ Promote to Manager" / "Demote to Staff" (rpc set_staff_role).
+  * "🔑 Reset Password" (rpc reset_staff_password): also signs that user out everywhere.
+  * "Deactivate" / "Activate" (rpc set_staff_active): blocks the login and all data
+    access; history is kept. Managers cannot change their own role or status.
+- There is no "switch user" button: with real logins you sign in as yourself.
+
+E. SIGN OUT:
+- "Sign Out" in the top bar or the modal ends the Supabase session.
+
+--------------------------------------------------------------------------------
+16. ACTION-ONLY LOGS, SHIFTS & MANAGER PAGES (supersedes parts of section 14)
+--------------------------------------------------------------------------------
+A. WHAT IS LOGGED:
+- A log record is written ONLY when someone clicks a ⚡ action button on a driver
+  row: SHIFT (Open Shift), CYCLE (Open Cycle), FIX_LOG, BREAK, DRIVER_CONNECTED
+  (Connect). Status changes, quick checks (✓), transfers and driver / company
+  add / delete are NOT logged. The activities INSERT policy rejects any other
+  action_type. Older records of other types stay in the database but are not shown.
+
+B. SHIFTS (Tashkent time, UTC+5, no daylight saving; src/config/shifts.js):
+- MORNING 07:00-15:00, AFTERNOON 13:00-23:00, NIGHT 23:00-07:00, 2 staff per shift.
+  Pages also show the hours converted to US Eastern for the day (follows EST/EDT).
+- staff_profiles.shift_code holds each person's assigned shift. Managers change the
+  whole schedule at once with rpc save_shift_schedule({MORNING:[ids],AFTERNOON:[ids],
+  NIGHT:[ids]}): max 2 per shift, one shift per person, people left out are unassigned.
+- Every activity is stamped by the database trigger (public.cb_shift_of) with:
+  * shift_code: the shift its author is assigned to at that moment; someone with no
+    shift is placed by the clock (13:00-15:00 overlap counts as MORNING).
+  * shift_date: the WORK DAY = Tashkent date the shift started. A work day runs from
+    07:00 Tashkent to 07:00 the next day, so a night shift past midnight belongs to the
+    day it began. Old records were backfilled by the clock.
+- Reassigning someone later never changes past records.
+
+C. MANAGER PAGES (top bar):
+- Logs (staff see only their own): pick a work day (◀ ▶ / date) and a shift
+  (All / Morning / Afternoon / Night); filter by staff, action and driver/company.
+  Each row shows the exact time in Tashkent and US Eastern, shift, staff, driver,
+  action and note, plus per-action counts for the selection.
+- Shifts: shift control panel. Three shift cards with 2 staff slots each, "On duty
+  now" badge, unassigned list, Save Schedule / Discard.
+- Statistics: period 1 Day / 1-4 Weeks / 1 Month ending on a chosen work day. Shows
+  all-3-shift totals per action, per-shift totals with who did them, a per-staff
+  table, and a day-by-day breakdown by shift for multi-day periods.
+
+D. DATABASE CHANGES (supabase_schema.sql, safe to re-run):
+- New columns staff_profiles.shift_code, activities.shift_code, activities.shift_date.
+- Split RLS on companies / drivers: SELECT + UPDATE for members, INSERT + DELETE for
+  managers. Reorders use rpc save_driver_order / save_company_order (updates that run
+  with the caller's permissions) instead of upserts.
+- Tests 14-16 in tests/supabase_accountability.test.js cover these rules.
+
+--------------------------------------------------------------------------------
+17. CHANGE LOG
+--------------------------------------------------------------------------------
+OCTOBER 2026 - SHIFTS & MANAGER DASHBOARD:
+- Only managers add / remove drivers and companies (UI + database).
+- Logs record only the ⚡ action buttons; status-change / quick-check / transfer /
+  add / delete logging removed.
+- Added shift scheduling, shift stamping on every action, the Logs (day + shift
+  filter), Shifts and Statistics pages. Replaced ManagerAnalyticsView.vue.
+
+OCTOBER 2026 - SINGLE SHARED DATABASE:
+- Removed the in-app Supabase connect screen, solo mode and every localStorage
+  data fallback; the database comes only from VITE_SUPABASE_URL /
+  VITE_SUPABASE_ANON_KEY on the host.
+- Accounts moved from browser storage / the Express server to Supabase Auth with
+  database functions for team registration and staff management.
+- Team isolation, activity actor stamping and immutability enforced by RLS +
+  trigger in the database instead of in the browser.
+- Daily NO SIGN reset moved into the database (once per team per day).
+- Retired the Express backend (server/), its JSON file database and tests, the
+  /api dev proxy, and the express / cors / xlsx dependencies. Unused files were
+  replaced by "UNUSED - safe to delete" stubs (see README).
+- Saves that the database rejects show a red "not saved" toast and the board
+  reloads from the database, so screens never silently drift from the truth.
+- Fixed: after signing in, the fleet did not load until a page reload.
+- Fixed: the ⚡ Log Activity menu opened underneath the next driver row.
+- Reorders save only the rows that moved (fewer writes and realtime events).
+
+OCTOBER 2026 - COMPLETION PASS (before the single-database change):
+- Fixed the App.vue syntax error that broke the build, delete-audit ordering,
+  stale order_index after reorder, TRANSFER / STATUS_CHANGE logging from the edit
+  modal and drag between companies, analytics role/active display and Eastern-time
+  grouping, Activity Log company filter, Driver Connection / Status Change cards.
+
+--------------------------------------------------------------------------------
+18. GUIDELINE FOR FUTURE CHANGES
 --------------------------------------------------------------------------------
 Whenever any new feature, column, setting, or database change is added to this
 project, this checkingboard.txt file MUST be updated with the feature description,

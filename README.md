@@ -1,38 +1,64 @@
 # CheckingBoard - Dispatch Driver Tracker
 
-Dynamic, Excel-inspired fleet dispatch management system built with **Vue 3** and **Tailwind CSS**.
+Dynamic, Excel-inspired fleet dispatch board built with **Vue 3**, **Tailwind CSS** and **Supabase**.
+All teams and dispatchers share one Supabase database: accounts, fleet, and the activity audit log.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Setup (once)
 
-Double-click `start.bat` or run:
+1. **Database:** in your Supabase project, open **SQL Editor**, paste the whole of
+   `supabase_schema.sql` and click **Run**. It is safe on an existing project: it keeps your
+   companies, drivers and activity history.
+2. **Turn off public sign-up:** Supabase → **Authentication → Sign In / Providers** →
+   disable **Allow new users to sign up**. (Accounts are created by managers inside the app.)
+3. **Environment variables** on the host where the frontend is deployed (then rebuild / redeploy):
+   ```
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-anon-public-key
+   ```
+   Both values are in Supabase → **Project Settings → API**. For local development, put the
+   same two lines in a `.env` file.
+4. **Create your team:** open the app → **Create a Team**. You become the manager.
+5. **Bring in the existing fleet** (only if the database already had drivers from before
+   team accounts): in the SQL Editor run
+   ```sql
+   SELECT public.claim_legacy_fleet('your-username');
+   ```
+
+Then add staff in **Team & Staff Management** (click your name in the top bar) and give each
+person their username and password.
+
+---
+
+## 💻 Local development
+
 ```bash
-npm run dev
+npm install
+npm run dev        # http://localhost:5173  (needs the .env above)
+npm run build      # production build in dist/
 ```
-Then open your browser at `http://localhost:5173`.
 
----
+Double-clicking `start.bat` also runs the dev server.
+
+## ✅ Tests
+
+The test suite runs against a real Supabase **test** project with `supabase_schema.sql` applied
+(each run creates new test logins, so don't point it at production):
+
+```bash
+TEST_SUPABASE_URL=https://test-project.supabase.co TEST_SUPABASE_ANON_KEY=... npm test
+```
 
 ## 🎨 Status & Color Configuration
-To change any status names, codes, or colors, open:
-📁 `src/config/statusConfig.js`
 
-You can change background colors (`bgColor`), text colors (`textColor`), border colors, and descriptions.
+Status names, codes and colors live in `src/config/statusConfig.js`.
 
----
+## 🧹 Unused files (safe to delete)
 
-## 💾 Database Recommendations
+These are no longer used and were replaced by short "UNUSED" stubs:
+`server/` (old Express backend; `data.json` there is old test data), `supabase_activities_migration.sql`,
+`src/services/storageService.js`, `src/services/excelService.js`,
+`src/components/SupabaseConnectModal.vue`, `tests/activity_accountability.test.js`.
 
-The project supports both client-side storage and backend persistence. Depending on how your dispatch team works, here are the best database choices:
-
-### 1. SQLite (Recommended for Local / Desktop / Single Office)
-- **Why**: Zero configuration, single-file (`checkingboard.db`), blazingly fast, 100% free with zero monthly cloud cost.
-- **How to use**: Run the included Node.js server (`npm run server`) on an office computer or local network server.
-
-### 2. Supabase / PostgreSQL (Recommended if Dispatchers Work Remotely)
-- **Why**: Cloud-hosted PostgreSQL with built-in WebSockets (Realtime). When Dispatcher A marks a driver "GOING DEL", Dispatcher B's screen updates immediately without refreshing.
-- **Cost**: Free tier includes 500 MB database and unlimited API requests.
-
-### 3. PocketBase (Single Executable + Realtime)
-- **Why**: A single lightweight `.exe` file that embeds SQLite, real-time subscriptions, and an admin dashboard.
+See `checkingboard.txt` for the full specification.
