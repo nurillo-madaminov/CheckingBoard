@@ -1,196 +1,84 @@
 <template>
-  <div class="h-screen w-screen flex items-center justify-center bg-slate-900 select-none p-4 relative overflow-hidden">
-    <!-- Subtle Background Elements -->
-    <div class="absolute -top-40 -right-40 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none"></div>
-    <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
-
-    <!-- Login / Register Card -->
-    <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
-      <!-- Card Header -->
-      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 px-6 py-6 text-white text-center relative">
-        <div class="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 text-white flex items-center justify-center font-black text-2xl mx-auto shadow-md mb-2">
-          CB
-        </div>
-        <h1 class="text-xl font-black tracking-tight">CheckingBoard</h1>
-        <p class="text-xs text-emerald-100 font-medium mt-0.5">
-          Dynamic Fleet & Activity Audit Tracking System
+  <div class="login">
+    <!-- Brand panel -->
+    <div class="hero">
+      <div class="hero-brand">
+        <span class="hero-mark">CB</span>
+        <span class="hero-name">CheckingBoard</span>
+      </div>
+      <div class="hero-copy">
+        <div class="hero-title">Every driver,<br>checked on time.</div>
+        <p class="hero-text">
+          A live dispatch board for carrier teams. Drivers grouped by company, sorted by status and aged by
+          their last check, with every ELD action logged to the shift that made it.
         </p>
-
-        <!-- Mode Toggle Tabs -->
-        <div class="mt-4 flex rounded-lg bg-black/20 p-1 text-xs font-bold">
-          <button
-            @click="mode = 'login'"
-            :class="[
-              'flex-1 py-1.5 rounded-md transition-all',
-              mode === 'login' ? 'bg-white text-slate-900 shadow-sm' : 'text-emerald-100 hover:text-white'
-            ]"
-          >
-            Sign In
-          </button>
-          <button
-            @click="mode = 'create_team'"
-            :class="[
-              'flex-1 py-1.5 rounded-md transition-all',
-              mode === 'create_team' ? 'bg-white text-slate-900 shadow-sm' : 'text-emerald-100 hover:text-white'
-            ]"
-          >
-            Create a Team
-          </button>
+      </div>
+      <div class="hero-shifts">
+        <div v-for="s in SHIFTS" :key="s.code" class="hero-shift">
+          <span class="hero-shift-label">{{ s.label }}</span>
+          <span class="hero-shift-hours">{{ shiftHours(s.code).tashkent }}</span>
         </div>
       </div>
+    </div>
 
-      <!-- Card Body -->
-      <div class="p-6">
-        <!-- Error Message Alert -->
-        <div
-          v-if="errorMessage"
-          class="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-center gap-2"
-        >
-          <span>⚠️</span>
-          <span>{{ errorMessage }}</span>
+    <!-- Form -->
+    <div class="form-side">
+      <form class="card" @submit.prevent="mode === 'login' ? handleLogin() : handleCreateTeam()">
+        <div class="seg">
+          <button type="button" :class="['seg-btn', { 'is-on': mode === 'login' }]" @click="setMode('login')">Sign in</button>
+          <button type="button" :class="['seg-btn', { 'is-on': mode === 'create_team' }]" @click="setMode('create_team')">Create a team</button>
         </div>
 
-        <!-- 1. SIGN IN FORM -->
-        <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="space-y-4">
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Username
-            </label>
-            <input
-              v-model="loginForm.username"
-              type="text"
-              required
-              autocomplete="username"
-              autocapitalize="none"
-              placeholder="Enter your username"
-              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
-            />
+        <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
+
+        <div v-if="mode === 'login'" class="fields">
+          <h3 class="card-title">Sign in to CheckingBoard</h3>
+          <div class="field">
+            <label for="login-user">Username</label>
+            <input id="login-user" v-model="loginForm.username" class="input" required autocomplete="username" autocapitalize="none" placeholder="Enter your username" />
           </div>
-
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Password
-            </label>
-            <input
-              v-model="loginForm.password"
-              type="password"
-              required
-              autocomplete="current-password"
-              placeholder="Enter your password"
-              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
-            />
+          <div class="field">
+            <label for="login-pass">Password</label>
+            <input id="login-pass" v-model="loginForm.password" class="input" type="password" required autocomplete="current-password" placeholder="Enter your password" />
           </div>
+        </div>
 
-          <button
-            type="submit"
-            :disabled="isLoading"
-            class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm shadow-md transition-all disabled:opacity-50"
-          >
-            {{ isLoading ? 'Signing in...' : 'Sign In to Dispatch' }}
-          </button>
-
-          <!-- Create a Team Prompt -->
-          <div class="pt-3 border-t border-slate-100 text-center">
-            <p class="text-xs text-slate-500">
-              Don't have a team account?
-            </p>
-            <button
-              type="button"
-              @click="mode = 'create_team'"
-              class="mt-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 underline"
-            >
-              + Create a Team as Manager
-            </button>
+        <div v-else class="fields">
+          <h3 class="card-title">Create a team</h3>
+          <p class="cb-sub card-note">You become the team's manager and can create logins for your staff.</p>
+          <div class="field">
+            <label for="team-name">Team / company name</label>
+            <input id="team-name" v-model="teamForm.teamName" class="input" required placeholder="Enter team name" />
           </div>
-        </form>
-
-        <!-- 2. CREATE A TEAM FORM (CREATOR IS MANAGER) -->
-        <form v-else @submit.prevent="handleCreateTeam" class="space-y-3.5">
-          <!-- Role Note -->
-          <div class="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-            <span>👑</span>
-            <span class="font-medium">
-              You are creating a new team. You will be the <strong>Manager</strong> and can create accounts for your staff.
-            </span>
+          <div class="field">
+            <label for="team-manager">Manager full name</label>
+            <input id="team-manager" v-model="teamForm.managerName" class="input" required placeholder="Enter your full name" />
           </div>
-
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Team / Company Name
-            </label>
-            <input
-              v-model="teamForm.teamName"
-              type="text"
-              required
-              placeholder="e.g. Apex Logistics"
-              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
-            />
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-              Manager Full Name
-            </label>
-            <input
-              v-model="teamForm.managerName"
-              type="text"
-              required
-              placeholder="e.g. Sarah Connor"
-              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
-            />
-          </div>
-
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Username
-              </label>
+          <div class="two-col">
+            <div class="field">
+              <label for="team-user">Username</label>
               <input
+                id="team-user"
                 v-model="teamForm.username"
-                type="text"
+                class="input"
                 required
                 autocapitalize="none"
                 pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}"
                 title="3-32 characters: letters, numbers, dot, dash or underscore"
-                placeholder="e.g. sarah"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
+                placeholder="Choose a username"
               />
             </div>
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Password
-              </label>
-              <input
-                v-model="teamForm.password"
-                type="password"
-                required
-                minlength="6"
-                autocomplete="new-password"
-                placeholder="Min. 6 characters"
-                class="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900"
-              />
+            <div class="field">
+              <label for="team-pass">Password</label>
+              <input id="team-pass" v-model="teamForm.password" class="input" type="password" required minlength="6" autocomplete="new-password" placeholder="At least 6 characters" />
             </div>
           </div>
+        </div>
 
-          <button
-            type="submit"
-            :disabled="isLoading"
-            class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm shadow-md transition-all disabled:opacity-50 mt-2"
-          >
-            {{ isLoading ? 'Creating Team...' : 'Create Team & Enter as Manager' }}
-          </button>
-
-          <div class="text-center pt-2">
-            <button
-              type="button"
-              @click="mode = 'login'"
-              class="text-xs font-bold text-slate-500 hover:text-slate-800"
-            >
-              ← Back to Sign In
-            </button>
-          </div>
-        </form>
-      </div>
+        <button type="submit" class="btn btn-primary submit" :disabled="isLoading">
+          {{ isLoading ? 'Please wait…' : (mode === 'login' ? 'Sign in' : 'Create team and sign in') }}
+        </button>
+      </form>
     </div>
   </div>
 </template>
@@ -198,6 +86,7 @@
 <script setup>
 import { ref, reactive } from 'vue';
 import { loginUser, createTeam } from '../services/authService';
+import { SHIFTS, shiftHours } from '../config/shifts';
 
 const emit = defineEmits(['login-success']);
 
@@ -216,6 +105,11 @@ const teamForm = reactive({
   username: '',
   password: ''
 });
+
+function setMode(next) {
+  mode.value = next;
+  errorMessage.value = '';
+}
 
 async function handleLogin() {
   errorMessage.value = '';
@@ -248,3 +142,48 @@ async function handleCreateTeam() {
   }
 }
 </script>
+
+<style scoped>
+.login {
+  height: 100vh; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  background: var(--color-surface); user-select: none;
+}
+.hero {
+  background: var(--color-accent-900); color: var(--color-bg); padding: 48px 56px;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
+}
+.hero-brand { display: flex; align-items: center; gap: 10px; }
+.hero-mark {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  background: var(--color-accent); font-family: var(--font-heading); font-weight: 600; font-size: 14px;
+}
+.hero-name { font-family: var(--font-heading); font-weight: 600; font-size: 19px; }
+.hero-copy { display: flex; flex-direction: column; gap: 18px; max-width: 540px; }
+.hero-title {
+  font-family: var(--font-heading); font-weight: 600; font-size: 68px; line-height: 0.94;
+  letter-spacing: -0.01em; text-transform: uppercase;
+}
+.hero-text { margin: 0; font-size: 16px; line-height: 1.5; color: var(--color-accent-200); max-width: 440px; text-wrap: pretty; }
+.hero-shifts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--color-accent-700); }
+.hero-shift { padding: 14px 0 0 16px; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--color-accent-700); }
+.hero-shift:first-child { padding-left: 0; border-left: 0; }
+.hero-shift-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-300); }
+.hero-shift-hours { font-family: var(--font-heading); font-size: 20px; }
+
+.form-side { display: flex; align-items: center; justify-content: center; padding: 48px; }
+.card {
+  width: 100%; max-width: 400px; padding: 32px; display: flex; flex-direction: column; gap: 18px;
+  background: var(--color-neutral-100); border: 1px solid var(--color-divider); box-shadow: var(--shadow-md);
+}
+.card .seg { display: flex; }
+.fields { display: flex; flex-direction: column; gap: 14px; }
+.card-title { margin: 0; font-family: var(--font-heading); font-weight: 600; font-size: 28px; line-height: 1.1; }
+.card-note { margin: 0; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.submit { width: 100%; padding: 11px 14px; font-size: 15px; }
+
+@media (max-width: 900px) {
+  .login { grid-template-columns: 1fr; }
+  .hero { display: none; }
+}
+</style>

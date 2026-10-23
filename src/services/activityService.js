@@ -7,12 +7,13 @@ import { SHIFTS, dateRange } from '../config/shifts';
  * Status changes, quick checks, transfers and add / delete are not logged
  * (the database rejects any other action type).
  */
+// key: keyboard shortcut on the board; tag: the action's label look in the logs
 export const ACTION_TYPES = [
-  { code: 'SHIFT', label: 'Open Shift', icon: '🌅', color: 'bg-blue-100 text-blue-800 border-blue-300' },
-  { code: 'CYCLE', label: 'Open Cycle', icon: '🔄', color: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
-  { code: 'FIX_LOG', label: 'Fix Log', icon: '🛠️', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-  { code: 'BREAK', label: 'Take Break', icon: '☕', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-  { code: 'DRIVER_CONNECTED', label: 'Connect', icon: '🔗', color: 'bg-teal-100 text-teal-800 border-teal-300' }
+  { code: 'SHIFT', label: 'Open Shift', short: 'Shift', key: '1', tag: { background: 'var(--color-accent-100)', color: 'var(--color-accent-900)' } },
+  { code: 'CYCLE', label: 'Open Cycle', short: 'Cycle', key: '2', tag: { background: 'var(--color-accent-200)', color: 'var(--color-accent-900)' } },
+  { code: 'FIX_LOG', label: 'Fix Log', short: 'Fix log', key: '3', tag: { background: 'var(--color-accent-700)', color: 'var(--color-bg)' } },
+  { code: 'BREAK', label: 'Take Break', short: 'Break', key: '4', tag: { background: 'var(--color-neutral-200)', color: 'var(--color-accent-900)' } },
+  { code: 'DRIVER_CONNECTED', label: 'Connect', short: 'Connect', key: '5', tag: { background: 'var(--color-accent-300)', color: 'var(--color-accent-900)' } }
 ];
 
 export const ACTION_CODES = ACTION_TYPES.map(a => a.code);
@@ -21,8 +22,9 @@ export function getActionTypeConfig(code) {
   return ACTION_TYPES.find(a => a.code === code) || {
     code,
     label: code,
-    icon: '•',
-    color: 'bg-slate-100 text-slate-800 border-slate-300'
+    short: code,
+    key: '',
+    tag: { background: 'var(--color-neutral-200)', color: 'var(--color-neutral-800)' }
   };
 }
 

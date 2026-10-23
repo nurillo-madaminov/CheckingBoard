@@ -202,7 +202,7 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
   update their rows to READY and Red simultaneously, and receive a toast alert:
   "Fleet reset to READY by another dispatcher".
 - INACTIVE Drivers Excluded: Drivers with `status: 'INACTIVE'` are deliberately preserved
-  as INACTIVE across the entire database. They remain strictly in the HOME/INACTIVE tab
+  as INACTIVE across the entire database. They remain strictly in the INACTIVE tab
   and do NOT get shown on the main CHECKING BOARD tab.
 - This immediately marks all active driver rows in Red (Needs check ASAP / Overdue), giving
   dispatchers a synchronized clean slate for daily check rounds without altering inactive profiles.
@@ -244,7 +244,7 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
 - Driver Counts Exclude Inactive Drivers: The master 'CHECKING BOARD' bottom tab badge
   count and the bottom bar legend ('Total: X drivers') now strictly exclude inactive
   drivers, counting only active fleet drivers.
-- Inactive drivers remain viewable, countable, and manageable under the 'HOME/INACTIVE' tab.
+- Inactive drivers remain viewable, countable, and manageable under their own 'INACTIVE' tab (HOME and SHOP drivers have the 'HOME/SHOP' tab).
 
 --------------------------------------------------------------------------------
 14. ACTIVITY TRACKING, STAFF ACCOUNTABILITY & HISTORICAL DATA INTEGRITY
@@ -441,7 +441,7 @@ C. MANAGER PAGES (top bar):
   action and note, plus per-action counts for the selection.
 - Shifts: shift control panel. Three shift cards with 2 staff slots each, "On duty
   now" badge, unassigned list, Save Schedule / Discard.
-- Statistics: period 1 Day / 1-4 Weeks / 1 Month ending on a chosen work day. Shows
+- Statistics: a date range picked on a calendar (up to 31 days, see 16B). Shows
   all-3-shift totals per action, per-shift totals with who did them, a per-staff
   table, and a day-by-day breakdown by shift for multi-day periods.
 
@@ -453,8 +453,50 @@ D. DATABASE CHANGES (supabase_schema.sql, safe to re-run):
 - Tests 14-16 in tests/supabase_accountability.test.js cover these rules.
 
 --------------------------------------------------------------------------------
+16B. V2 LOOK — "INDUSTRY" DESIGN SYSTEM (supersedes the visual details in 4-13)
+--------------------------------------------------------------------------------
+Source: Claude Design project "CheckingBoard-v2" (ledger layout). Tokens and
+component classes live in src/assets/industry.css; take colors, fonts and
+spacing from its variables. Steel accent (#5980a6) on a light grey ground,
+Barlow Condensed headings over Barlow (Google Fonts, linked in index.html),
+square hairline-bordered objects. The only warm color is the signal
+(--color-signal, #a3412f): overdue checks, NO SIGN, destructive actions.
+
+- Shell: dark steel sidebar (SideNav.vue) with Board / Logs (+ Shifts / Statistics
+  for managers), the shift on duty with time left and its staff's action counts,
+  Tashkent and Eastern clocks, live indicator, and your name (opens Team & staff)
+  with sign-out. The old top bar (StatsBar), Excel bottom bar (BottomTabs) and the
+  status color editor (StatusConfigModal) were removed.
+- Board (CheckingBoardTable.vue): title + search ("/" focuses it), Reset to Ready,
+  + Company (managers). KPI cards: active drivers with a status mix bar, checked in
+  the last hour, overdue 4h+ (click jumps to the oldest), actions this shift with
+  hourly bars. Rows: drag by #, unit chip, flag, hover actions (check, log menu,
+  flag, edit, delete for managers), sign / status selects in the status look from
+  statusConfig.js, last-check age with a bar, inline notes. Sheet tabs sit under
+  the board (first tab fixed, others draggable). Company rows show a freshness
+  strip and the overdue count. Below 720px tall the KPI cards hide; below 1240px
+  wide the sidebar and columns narrow.
+- Keyboard on the board: ↑ ↓ select, C mark checked, E edit, 1-5 log Shift / Cycle /
+  Fix Log / Break / Connect, / search, Esc closes menus and dialogs.
+- Freshness levels (utils/freshness.js): fresh < 1h, aging 1-2.5h, warning 2.5-4h,
+  overdue 4h+ or never; shown as steel shades, overdue in the signal color.
+- Flag replaces the 6-color row highlight; it is stored in highlight_color.
+- Confirmations (delete driver / company, reset fleet, deactivate staff) use an
+  in-app dialog (ConfirmDialog.vue) instead of the browser's confirm().
+- Logs: day stepper (click the day to pick any date), shift filter and staff filter
+  for managers, search, clickable per-action count tiles.
+- Shifts: the shift on duty is drawn dark; each card shows actions in the last 7 days.
+- Statistics: a calendar range picker (click a start day, then an end day; up to
+  31 days, nothing after today); day-by-day stacked columns (at least a
+  week shown) in three steel shades for Morning / Afternoon / Night.
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - V2 REDESIGN:
+- Restyled the whole app to the CheckingBoard-v2 design (section 16B): sidebar
+  shell, KPI cards, keyboard shortcuts, flag rows, in-app confirmations, new login.
+
 OCTOBER 2026 - SHIFTS & MANAGER DASHBOARD:
 - Only managers add / remove drivers and companies (UI + database).
 - Logs record only the ⚡ action buttons; status-change / quick-check / transfer /

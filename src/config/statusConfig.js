@@ -1,207 +1,115 @@
 /**
  * ==============================================================================
- * CHECKING BOARD - STATUS & COLOR CONFIGURATION FILE
+ * CHECKING BOARD - STATUSES, SIGN VALUES & SHEET TABS
  * ==============================================================================
- * You can easily customize any status name, code, description, or colors here!
- * Simply change the colors (hex format #RRGGBB or Tailwind classes) below.
+ * Each status carries its "look" on the board: background, text color and border,
+ * all taken from the design system's steel ramp (see src/assets/industry.css).
+ * The busier the status, the darker the fill: AT PU / AT DEL are solid steel,
+ * READY is an outline, INACTIVE is dashed.
  * ==============================================================================
  */
 
 export const DRIVER_STATUSES = [
   {
-    id: 'AT_PU',
     code: 'AT PU',
     label: 'At Pick Up Location',
-    description: 'Driver has arrived at the shipper / pickup facility',
-    // Colors: Yellow
-    color: '#D97706',           // Text / Accent
-    bgColor: '#FEF08A',         // Badge background (light amber/yellow)
-    textColor: '#854D0E',       // Badge text
-    borderColor: '#EAB308',     // Border
-    rowBgColor: '#FEFCE8',      // Soft yellow row background
-    activeBgColor: '#FEF08A',   // Active / clicked row highlight
-    categoryTab: 'AT_PU_DEL'    // Appears in "AT PU/DEL" tab
+    categoryTab: 'AT_PU_DEL',
+    look: { background: 'var(--color-accent-700)', color: 'var(--color-bg)', border: '1px solid var(--color-accent-700)' }
   },
   {
-    id: 'AT_DEL',
     code: 'AT DEL',
     label: 'At Delivery Location',
-    description: 'Driver has arrived at the receiver / delivery facility',
-    // Colors: Yellow
-    color: '#D97706',
-    bgColor: '#FEF9C3',         // Badge background (yellow)
-    textColor: '#854D0E',
-    borderColor: '#FACC15',
-    rowBgColor: '#FEFCE8',      // Soft yellow row background
-    activeBgColor: '#FEF08A',   // Active / clicked row highlight
-    categoryTab: 'AT_PU_DEL'    // Appears in "AT PU/DEL" tab
+    categoryTab: 'AT_PU_DEL',
+    look: { background: 'var(--color-accent-700)', color: 'var(--color-bg)', border: '1px solid var(--color-accent-700)' }
   },
   {
-    id: 'COVERED',
     code: 'COVERED',
     label: 'Covered / Going to PU',
-    description: 'Driver has a load assigned and is heading to pickup',
-    // Colors: Darker Yellow / Amber
-    color: '#B45309',
-    bgColor: '#FDE68A',         // Darker yellow badge
-    textColor: '#78350F',
-    borderColor: '#F59E0B',
-    rowBgColor: '#FFFBEB',      // Soft amber row background
-    activeBgColor: '#FDE68A',   // Active / clicked row highlight
-    categoryTab: 'COVERED'      // Appears in "COVERED" tab
+    categoryTab: 'COVERED',
+    look: { background: 'var(--color-accent-300)', color: 'var(--color-accent-900)', border: '1px solid var(--color-accent-300)' }
   },
   {
-    id: 'GOING_DEL',
     code: 'GOING DEL',
     label: 'Going to Delivery',
-    description: 'Driver loaded and on the road heading to delivery',
-    // Colors: Blue
-    color: '#2563EB',
-    bgColor: '#DBEAFE',         // Light blue badge
-    textColor: '#1E40AF',       // Dark blue
-    borderColor: '#60A5FA',
-    rowBgColor: '#EFF6FF',      // Soft blue row background
-    activeBgColor: '#BFDBFE',   // Active / clicked row highlight
-    categoryTab: 'GOING_TO_DEL' // Appears in "GOING TO DEL" tab
+    categoryTab: 'GOING_TO_DEL',
+    look: { background: 'var(--color-accent-100)', color: 'var(--color-accent-800)', border: '1px solid var(--color-accent-400)' }
   },
   {
-    id: 'READY',
     code: 'READY',
     label: 'Ready for Load',
-    description: 'Driver is empty, available, and ready for load assignment',
-    // Colors: Green
-    color: '#16A34A',
-    bgColor: '#DCFCE7',         // Light green badge
-    textColor: '#166534',
-    borderColor: '#4ADE80',
-    rowBgColor: '#F0FDF4',      // Soft green row background
-    activeBgColor: '#BBF7D0',   // Active / clicked row highlight
-    categoryTab: 'READY'        // Appears in "READY FOR LOAD" tab
+    categoryTab: 'READY',
+    look: { background: 'transparent', color: 'var(--color-accent-800)', border: '1px solid var(--color-accent-600)' }
   },
   {
-    id: 'SHOP',
     code: 'SHOP',
     label: 'At Repair Shop',
-    description: 'Truck is at mechanic or repair facility undergoing service',
-    // Colors: Orange
-    color: '#EA580C',
-    bgColor: '#FFEDD5',         // Light orange badge
-    textColor: '#9A3412',
-    borderColor: '#FB923C',
-    rowBgColor: '#FFF7ED',      // Soft orange row background
-    activeBgColor: '#FED7AA',   // Active / clicked row highlight
-    categoryTab: 'HOME_INACTIVE'// Appears in "HOME/INACTIVE" tab
+    categoryTab: 'HOME',
+    look: { background: 'var(--color-neutral-200)', color: 'var(--color-neutral-800)', border: '1px solid var(--color-neutral-300)' }
   },
   {
-    id: 'HOME',
     code: 'HOME',
     label: 'At Home / Rest Off',
-    description: 'Driver is taking home time or off duty rest',
-    // Colors: Red
-    color: '#DC2626',
-    bgColor: '#FEE2E2',         // Light red badge
-    textColor: '#991B1B',
-    borderColor: '#F87171',
-    rowBgColor: '#FEF2F2',      // Soft red row background
-    activeBgColor: '#FECACA',   // Active / clicked row highlight
-    categoryTab: 'HOME_INACTIVE'// Appears in "HOME/INACTIVE" tab
+    categoryTab: 'HOME',
+    look: { background: 'var(--color-neutral-100)', color: 'var(--color-neutral-700)', border: '1px solid var(--color-neutral-300)' }
   },
   {
-    id: 'INACTIVE',
     code: 'INACTIVE',
     label: 'Inactive / Off Fleet',
-    description: 'Driver not currently working or inactive profile',
-    // Colors: Light Muted Green / Slate
-    color: '#65A30D',
-    bgColor: '#ECFCCB',         // Light lime/muted green badge
-    textColor: '#3F6212',
-    borderColor: '#A3E635',
-    rowBgColor: '#F7FEE7',      // Soft lime row background
-    activeBgColor: '#D9F99D',   // Active / clicked row highlight
-    categoryTab: 'HOME_INACTIVE'// Appears in "HOME/INACTIVE" tab
+    categoryTab: 'INACTIVE',
+    look: { background: 'transparent', color: 'var(--color-neutral-600)', border: '1px dashed var(--color-neutral-400)' }
   }
 ];
 
-/**
- * SIGN COLUMN VALUES & COLORS
- */
 export const SIGN_STATUSES = [
-  {
-    code: 'SIGNED',
-    label: 'SIGNED',
-    bgColor: '#D1FAE5',         // Soft emerald green
-    textColor: '#065F46',
-    borderColor: '#6EE7B7',
-    dotColor: '#10B981'
-  },
-  {
-    code: 'NO SIGN',
-    altCodes: ['NOT SIGNED'],
-    label: 'NO SIGN',
-    bgColor: '#FFE4E6',         // Soft rose/red
-    textColor: '#9F1239',
-    borderColor: '#FDA4AF',
-    dotColor: '#F43F5E'
-  }
+  { code: 'SIGNED', label: 'SIGNED' },
+  { code: 'NO SIGN', altCodes: ['NOT SIGNED'], label: 'NO SIGN' }
 ];
 
 /**
- * BOTTOM TABS DEFINITION
- * (Matches the Excel workbook tabs exactly)
+ * SHEET TABS along the bottom of the board
  */
 export const BOTTOM_TABS = [
   {
     id: 'CHECKING_BOARD',
-    label: 'CHECKING BOARD',
-    shortLabel: 'All Drivers',
-    badgeKey: 'all',
-    icon: 'Layers',
+    label: 'Checking Board',
+    subtitle: 'All active drivers, grouped by carrier',
     filterFn: (driver) => driver.status !== 'INACTIVE' // Inactive drivers hidden from main tab
   },
   {
     id: 'AT_PU_DEL',
     label: 'AT PU/DEL',
-    subtitle: 'AT PICKUP / AT DELIVERY - highest attention',
-    shortLabel: 'At PU / Del',
-    badgeKey: 'pu_del',
-    icon: 'MapPin',
+    subtitle: 'At pickup / at delivery — highest attention',
     filterFn: (driver) => ['AT PU', 'AT DEL'].includes(driver.status)
   },
   {
     id: 'READY',
-    label: 'READY FOR LOAD',
+    label: 'Ready for Load',
     subtitle: 'Drivers ready for load assignment',
-    shortLabel: 'Ready',
-    badgeKey: 'ready',
-    icon: 'CheckCircle2',
     filterFn: (driver) => driver.status === 'READY'
   },
   {
     id: 'COVERED',
-    label: 'COVERED',
-    subtitle: 'COVERED - going to pickup',
-    shortLabel: 'Covered',
-    badgeKey: 'covered',
-    icon: 'Truck',
+    label: 'Covered',
+    subtitle: 'Covered — going to pickup',
     filterFn: (driver) => driver.status === 'COVERED'
   },
   {
     id: 'GOING_TO_DEL',
-    label: 'GOING TO DEL',
+    label: 'Going to Del',
     subtitle: 'Drivers en route to delivery',
-    shortLabel: 'Going to Del',
-    badgeKey: 'going_del',
-    icon: 'Navigation',
     filterFn: (driver) => ['GOING DEL', 'GOING TO DEL'].includes(driver.status)
   },
   {
-    id: 'HOME_INACTIVE',
-    label: 'HOME/INACTIVE',
-    subtitle: 'HOME / REST-OFF / INACTIVE / SHOP',
-    shortLabel: 'Home / Inactive',
-    badgeKey: 'inactive',
-    icon: 'Home',
-    filterFn: (driver) => ['HOME', 'INACTIVE', 'SHOP'].includes(driver.status)
+    id: 'HOME',
+    label: 'Home/Shop',
+    subtitle: 'At home / rest-off, or at the repair shop',
+    filterFn: (driver) => ['HOME', 'SHOP'].includes(driver.status)
+  },
+  {
+    id: 'INACTIVE',
+    label: 'Inactive',
+    subtitle: 'Off fleet — hidden from the Checking Board',
+    filterFn: (driver) => driver.status === 'INACTIVE'
   }
 ];
 
@@ -211,22 +119,27 @@ export const BOTTOM_TABS = [
 export function getStatusConfig(code) {
   if (!code) return DRIVER_STATUSES[0];
   const normalized = String(code).trim().toUpperCase();
-  const match = DRIVER_STATUSES.find(s => s.code.toUpperCase() === normalized || s.id === normalized);
-  return match || {
-    code: code,
+  return DRIVER_STATUSES.find(s => s.code === normalized) || {
+    code,
     label: code,
-    bgColor: '#F3F4F6',
-    textColor: '#374151',
-    borderColor: '#D1D5DB'
+    categoryTab: 'CHECKING_BOARD',
+    look: { background: 'var(--color-neutral-100)', color: 'var(--color-neutral-700)', border: '1px solid var(--color-neutral-300)' }
   };
 }
 
 export function getSignConfig(code) {
   if (!code) return SIGN_STATUSES[1]; // default NO SIGN
   const normalized = String(code).trim().toUpperCase();
-  const match = SIGN_STATUSES.find(s => 
-    s.code.toUpperCase() === normalized || 
-    (s.altCodes && s.altCodes.some(a => a.toUpperCase() === normalized))
-  );
-  return match || SIGN_STATUSES[1];
+  return SIGN_STATUSES.find(s => s.code === normalized || (s.altCodes && s.altCodes.includes(normalized))) || SIGN_STATUSES[1];
 }
+
+// Tab a status moves a driver to (for "Moved to ..." toasts)
+export function getStatusTab(code) {
+  const tabId = getStatusConfig(code).categoryTab;
+  return BOTTOM_TABS.find(t => t.id === tabId) || BOTTOM_TABS[0];
+}
+
+// Flagged rows: the design replaces the old color palette with a single flag,
+// stored in the existing highlight_color column
+export const FLAG_COLOR = '#5980a6';
+export const isFlagged = (driver) => !!driver.highlightColor;

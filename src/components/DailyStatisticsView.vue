@@ -1,229 +1,99 @@
 <template>
-  <div class="h-full overflow-auto bg-slate-100 p-4 md:p-6 space-y-5 select-text">
-    <!-- Header & period controls -->
-    <header class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between flex-wrap gap-4">
-      <div>
-        <h2 class="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
-          <span>📊 Statistics</span>
-          <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300">
-            Manager Access
-          </span>
-        </h2>
-        <p class="text-xs text-slate-500 mt-0.5">
-          Action-button records only (Shift, Cycle, Fix Log, Break, Connect).
-          <span class="font-semibold text-slate-700">{{ rangeLabel }}</span>
-        </p>
+  <div class="cb-page cb-scroll stats">
+    <div class="cb-page-head">
+      <div class="title-block">
+        <h2 class="cb-title">Statistics</h2>
+        <span class="cb-sub">Action-button records only · {{ rangeLabel }}</span>
       </div>
-
-      <div class="flex items-center gap-3 flex-wrap text-xs">
-        <div class="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200 font-semibold">
-          <button
-            v-for="p in PERIODS"
-            :key="p.id"
-            @click="periodId = p.id"
-            :class="[
-              'px-2.5 py-1 rounded-md transition-colors',
-              periodId === p.id ? 'bg-white text-slate-900 shadow-2xs font-bold border border-slate-200' : 'text-slate-600 hover:text-slate-900'
-            ]"
-          >
-            {{ p.label }}
-          </button>
-        </div>
-
-        <div class="flex items-center gap-1.5">
-          <span class="text-slate-500 font-semibold">Ending</span>
-          <input
-            v-model="endDay"
-            type="date"
-            :max="today"
-            class="px-2 py-1 rounded-md border border-slate-300 text-xs text-slate-800 bg-white"
-          />
-          <button v-if="endDay !== today" @click="endDay = today" class="text-indigo-600 hover:text-indigo-800 font-semibold">
-            Today
-          </button>
-          <button
-            @click="load"
-            class="ml-1 px-2 py-1 rounded-md bg-white hover:bg-slate-100 border border-slate-300 font-semibold text-slate-700"
-            title="Reload from the database"
-          >
-            ↻
-          </button>
-        </div>
-      </div>
-    </header>
-
-    <div v-if="errorMessage" class="p-3 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200">
-      {{ errorMessage }}
+      <div class="cb-spacer"></div>
+      <DateRangePicker :from="fromDay" :to="toDay" :max="today" :maxDays="MAX_DAYS" @change="setRange" />
     </div>
 
-    <div :class="['space-y-5 transition-opacity', isLoading ? 'opacity-50' : '']">
-      <!-- Whole team (all 3 shifts) -->
-      <section class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        <div class="bg-slate-900 text-white p-4 rounded-xl shadow-2xs flex flex-col justify-between col-span-2 sm:col-span-1">
-          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-300">All 3 shifts</span>
-          <div class="text-3xl font-black mt-2">{{ stats.team.total }}</div>
-          <span class="text-[10px] text-slate-400 mt-1">
-            {{ dayCount > 1 ? `≈ ${perDay(stats.team.total)} per day` : 'actions' }}
-          </span>
-        </div>
-        <div
-          v-for="act in ACTION_TYPES"
-          :key="act.code"
-          class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between"
-        >
-          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">{{ act.icon }} {{ act.label }}</span>
-          <div class="text-2xl font-black text-slate-900 mt-2">{{ stats.team[act.code] || 0 }}</div>
-          <span class="text-[10px] text-slate-400 mt-1">{{ shareOf(stats.team[act.code], stats.team.total) }} of all</span>
-        </div>
-      </section>
+    <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
-      <!-- Per shift -->
-      <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div
-          v-for="shift in SHIFTS"
-          :key="shift.code"
-          class="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col"
-          :style="{ borderTop: `4px solid ${shift.accent}` }"
-        >
-          <div class="px-4 pt-3 pb-2 flex items-start justify-between gap-2">
-            <div>
-              <h3 class="font-black text-slate-900 text-sm">{{ shift.icon }} {{ shift.label }} Shift</h3>
-              <div class="text-[11px] font-mono text-slate-500">
-                {{ shiftHours(shift.code, endDay).tashkent }} Tashkent · {{ shiftHours(shift.code, endDay).eastern }}
-              </div>
-            </div>
-            <div class="text-right">
-              <div class="text-2xl font-black text-slate-900 leading-none">{{ stats.byShift[shift.code].total }}</div>
-              <div class="text-[10px] text-slate-400 mt-1">{{ shareOf(stats.byShift[shift.code].total, stats.team.total) }} of all</div>
-            </div>
-          </div>
-
-          <div class="px-4 pb-3 grid grid-cols-5 gap-1 text-center">
-            <div v-for="act in ACTION_TYPES" :key="act.code" class="rounded-md bg-slate-50 border border-slate-100 py-1.5" :title="act.label">
-              <div class="text-xs">{{ act.icon }}</div>
-              <div class="text-sm font-black text-slate-900">{{ stats.byShift[shift.code][act.code] || 0 }}</div>
-            </div>
-          </div>
-
-          <div class="px-4 py-3 border-t border-slate-100 flex-1">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Who did them</div>
-            <div v-if="stats.byShift[shift.code].staff.length" class="space-y-1">
-              <div
-                v-for="s in stats.byShift[shift.code].staff"
-                :key="s.staffId"
-                class="flex items-center justify-between text-xs"
-              >
-                <span class="font-semibold text-slate-800 truncate">👤 {{ s.displayName }}</span>
-                <span class="font-mono font-bold text-slate-900">{{ s.total }}</span>
-              </div>
-            </div>
-            <p v-else class="text-xs text-slate-400">No actions in this period.</p>
-            <p class="text-[10px] text-slate-400 mt-2">
-              Scheduled now: {{ scheduledNames(shift.code) || 'nobody' }}
-            </p>
-          </div>
+    <div :class="['body', { 'is-loading': isLoading }]">
+      <!-- Totals -->
+      <div class="cb-panel totals">
+        <div class="total-tile">
+          <span class="kicker">All 3 shifts</span>
+          <span class="cb-num total-num">{{ stats.team.total }}</span>
+          <span class="total-sub">{{ dayCount > 1 ? `≈ ${perDay(stats.team.total)} per day` : 'actions this day' }}</span>
         </div>
-      </section>
-
-      <!-- Per staff -->
-      <section class="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-extrabold text-slate-900">👤 Per Staff Member</h3>
-          <span class="text-xs text-slate-500">{{ stats.byStaff.length }} people</span>
+        <div v-for="act in ACTION_TYPES" :key="act.code" class="act-tile">
+          <span class="cb-label">{{ act.label }}</span>
+          <span class="cb-num act-num">{{ stats.team[act.code] || 0 }}</span>
+          <span class="cb-bar"><span :style="{ width: `${barPct(stats.team[act.code], actionMax)}%`, background: 'var(--color-accent)' }"></span></span>
+          <span class="cb-sub small">{{ shareOf(stats.team[act.code], stats.team.total) }} of all</span>
         </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-slate-50 text-slate-600 border-b border-slate-200">
-              <tr>
-                <th class="py-2 px-3 font-bold">Staff Member</th>
-                <th class="py-2 px-3 font-bold">Current Shift</th>
-                <th v-for="act in ACTION_TYPES" :key="act.code" class="py-2 px-3 font-bold text-center">
-                  {{ act.icon }} {{ act.label }}
-                </th>
-                <th class="py-2 px-3 font-bold text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              <tr v-for="staff in stats.byStaff" :key="staff.staffId" class="hover:bg-slate-50">
-                <td class="py-2.5 px-3 font-bold text-slate-900">
-                  <div class="flex items-center gap-1.5">
-                    <span>{{ staff.role === 'manager' ? '👑' : '👤' }} {{ staff.displayName }}</span>
-                    <span v-if="staff.role === 'former'" class="text-[9px] px-1 rounded bg-amber-100 text-amber-800">Former</span>
-                    <span v-else-if="!staff.isActive" class="text-[9px] px-1 rounded bg-slate-200 text-slate-600">Deactivated</span>
-                  </div>
-                </td>
-                <td class="py-2.5 px-3">
-                  <span
-                    v-if="staff.shiftCode"
-                    :class="['px-2 py-0.5 rounded border text-[10px] font-bold uppercase', getShiftConfig(staff.shiftCode).color]"
-                  >
-                    {{ getShiftConfig(staff.shiftCode).icon }} {{ getShiftConfig(staff.shiftCode).label }}
-                  </span>
-                  <span v-else class="text-slate-400">—</span>
-                </td>
-                <td v-for="act in ACTION_TYPES" :key="act.code" class="py-2.5 px-3 text-center font-mono font-semibold">
-                  {{ staff[act.code] || 0 }}
-                </td>
-                <td class="py-2.5 px-3 text-right font-mono font-black text-slate-900">{{ staff.total }}</td>
-              </tr>
-              <tr v-if="stats.byStaff.length === 0">
-                <td :colspan="ACTION_TYPES.length + 3" class="py-6 text-center text-slate-400">No team members yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      </div>
 
-      <!-- Day by day (multi-day periods) -->
-      <section v-if="dayCount > 1" class="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
-        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h3 class="text-sm font-extrabold text-slate-900">📅 Day by Day</h3>
-          <!-- Legend -->
-          <div class="flex items-center gap-3 text-[11px] text-slate-600 font-semibold">
-            <span v-for="shift in SHIFTS" :key="shift.code" class="flex items-center gap-1.5">
-              <span class="w-2.5 h-2.5 rounded-sm" :style="{ backgroundColor: shift.accent }"></span>
-              {{ shift.label }}
+      <div class="split">
+        <!-- Day by day -->
+        <div class="cb-panel chart">
+          <div class="chart-head">
+            <span class="section-title">Day by day</span>
+            <span class="cb-spacer"></span>
+            <span v-for="s in SHIFTS" :key="s.code" class="legend">
+              <span class="swatch" :style="{ background: SHIFT_COLORS[s.code] }"></span>{{ s.label }}
             </span>
           </div>
+          <div class="columns">
+            <div v-for="col in chartCols" :key="col.date" class="column" :title="col.title">
+              <span v-for="s in SHIFTS_TOP_DOWN" :key="s.code" class="seg-bar" :style="{ height: `${col.pct[s.code]}%`, background: SHIFT_COLORS[s.code] }"></span>
+            </div>
+          </div>
+          <div class="col-labels">
+            <span v-for="col in chartCols" :key="col.date" :class="{ 'in-range': col.inRange }">{{ col.short }}</span>
+          </div>
         </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-slate-50 text-slate-600 border-b border-slate-200">
-              <tr>
-                <th class="py-2 px-3 font-bold w-40">Work Day</th>
-                <th class="py-2 px-3 font-bold">Actions by shift</th>
-                <th v-for="shift in SHIFTS" :key="shift.code" class="py-2 px-3 font-bold text-right w-24">{{ shift.label }}</th>
-                <th class="py-2 px-3 font-bold text-right w-20">Total</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              <tr v-for="day in stats.byDay" :key="day.date" class="hover:bg-slate-50">
-                <td class="py-2 px-3 font-semibold text-slate-800 whitespace-nowrap">{{ formatWorkDay(day.date) }}</td>
-                <td class="py-2 px-3">
-                  <div class="flex items-center h-3 gap-[2px]" :style="{ width: `${barWidth(day.total)}%` }">
-                    <template v-for="shift in SHIFTS" :key="shift.code">
-                      <span
-                        v-if="day[shift.code]"
-                        class="h-full first:rounded-l last:rounded-r"
-                        :style="{ flexGrow: day[shift.code], backgroundColor: shift.accent }"
-                        :title="`${formatWorkDay(day.date)} · ${shift.label}: ${day[shift.code]} action(s)`"
-                      ></span>
-                    </template>
-                  </div>
-                </td>
-                <td v-for="shift in SHIFTS" :key="shift.code" class="py-2 px-3 text-right font-mono">{{ day[shift.code] }}</td>
-                <td class="py-2 px-3 text-right font-mono font-black text-slate-900">{{ day.total }}</td>
-              </tr>
-            </tbody>
-          </table>
+
+        <!-- Per shift -->
+        <div class="shift-cards">
+          <div v-for="s in SHIFTS" :key="s.code" class="cb-panel shift-card">
+            <div class="shift-top">
+              <span class="shift-name">{{ s.label }} <span class="shift-hours">{{ shiftHours(s.code).tashkent }} Tashkent</span></span>
+              <span><span class="cb-num shift-total">{{ stats.byShift[s.code].total }}</span> <span class="cb-sub small">{{ shareOf(stats.byShift[s.code].total, stats.team.total) }} of all</span></span>
+            </div>
+            <div class="shift-acts">
+              <div v-for="act in ACTION_TYPES" :key="act.code" class="shift-act">
+                <span class="cb-num shift-act-num">{{ stats.byShift[s.code][act.code] || 0 }}</span>
+                <span class="shift-act-label">{{ act.short }}</span>
+              </div>
+            </div>
+          </div>
         </div>
-      </section>
+      </div>
+
+      <!-- Per staff -->
+      <div class="cb-panel">
+        <div class="cb-grid-head staff-grid">
+          <div class="pad">Per staff member</div><div>Shift</div>
+          <div v-for="act in ACTION_TYPES" :key="act.code" class="right">{{ act.short }}</div>
+          <div class="pad">Total</div>
+        </div>
+        <div v-for="p in stats.byStaff" :key="p.staffId" class="cb-grid-row staff-grid">
+          <div class="pad person">
+            <span class="cb-avatar avatar">{{ initials(p.displayName) }}</span>
+            <span class="cb-ellipsis strong">{{ p.displayName }}</span>
+            <span v-if="p.role === 'former'" class="tag tag-neutral">Former</span>
+            <span v-else-if="!p.isActive" class="tag tag-neutral">Deactivated</span>
+          </div>
+          <div class="cb-muted">{{ p.shiftCode ? getShiftConfig(p.shiftCode).label : '—' }}</div>
+          <div v-for="act in ACTION_TYPES" :key="act.code" class="right num">{{ p[act.code] || 0 }}</div>
+          <div class="pad total-cell">
+            <span class="cb-num staff-total">{{ p.total }}</span>
+            <span class="cb-bar staff-bar"><span :style="{ width: `${barPct(p.total, staffMax)}%`, background: 'var(--color-accent-500)' }"></span></span>
+          </div>
+        </div>
+        <div v-if="!stats.byStaff.length" class="empty">No team members yet.</div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
+import DateRangePicker from './DateRangePicker.vue';
 import { ACTION_TYPES, fetchActivities, summarizeActivities } from '../services/activityService';
 import { staffProfiles, loadTeamRoster } from '../services/authService';
 import {
@@ -232,60 +102,77 @@ import {
   shiftHours,
   currentWorkDay,
   addDays,
-  monthWindowStart,
-  formatWorkDay
+  dateRange,
+  formatWorkDayShort
 } from '../config/shifts';
+import { initials } from '../utils/format';
 
 const props = defineProps({
   // Bumped by the app after this user records an action
-  refreshKey: {
-    type: Number,
-    default: 0
-  }
+  refreshKey: { type: Number, default: 0 }
 });
 
-// The longest period is one month
-const PERIODS = [
-  { id: '1d', label: '1 Day', days: 1 },
-  { id: '1w', label: '1 Week', days: 7 },
-  { id: '2w', label: '2 Weeks', days: 14 },
-  { id: '3w', label: '3 Weeks', days: 21 },
-  { id: '4w', label: '4 Weeks', days: 28 },
-  { id: '1m', label: '1 Month' }
-];
+// The longest range is one month
+const MAX_DAYS = 31;
+
+// One steel hue, light to dark through the day (the design system is single-accent)
+const SHIFT_COLORS = { MORNING: 'var(--color-accent-300)', AFTERNOON: 'var(--color-accent-500)', NIGHT: 'var(--color-accent-800)' };
+const SHIFTS_TOP_DOWN = [...SHIFTS].reverse();
 
 const today = currentWorkDay();
-const periodId = ref('1d');
-const endDay = ref(today);
+// Chosen on the calendar; starts as the last 7 work days
+const fromDay = ref(addDays(today, -6));
+const toDay = ref(today);
 const activities = ref([]);
 const isLoading = ref(false);
 const errorMessage = ref('');
 let loadSeq = 0;
 
-const fromDay = computed(() => {
-  const period = PERIODS.find(p => p.id === periodId.value);
-  return period.days ? addDays(endDay.value, -(period.days - 1)) : monthWindowStart(endDay.value);
-});
+function setRange({ from, to }) {
+  fromDay.value = from;
+  toDay.value = to;
+}
 
-const dayCount = computed(() => {
-  const ms = Date.parse(endDay.value) - Date.parse(fromDay.value);
-  return Math.round(ms / 86400000) + 1;
-});
+const dayCount = computed(() => dateRange(fromDay.value, toDay.value).length);
+// The chart always shows at least a week (ending on the last chosen day) for context
+const chartFrom = computed(() => (dayCount.value < 7 ? addDays(toDay.value, -6) : fromDay.value));
 
 const rangeLabel = computed(() => (dayCount.value === 1
-  ? formatWorkDay(endDay.value)
-  : `${formatWorkDay(fromDay.value)} – ${formatWorkDay(endDay.value)} (${dayCount.value} days)`));
+  ? formatWorkDayShort(toDay.value)
+  : `${formatWorkDayShort(fromDay.value)} – ${formatWorkDayShort(toDay.value)} (${dayCount.value} days)`));
 
-const stats = computed(() => summarizeActivities(activities.value, {
+const inPeriod = computed(() => activities.value.filter(a => a.shift_date >= fromDay.value));
+
+const stats = computed(() => summarizeActivities(inPeriod.value, {
   fromDate: fromDay.value,
-  toDate: endDay.value,
+  toDate: toDay.value,
   staffProfiles: staffProfiles.value
 }));
 
-const maxDayTotal = computed(() => Math.max(1, ...stats.value.byDay.map(d => d.total)));
+const actionMax = computed(() => Math.max(1, ...ACTION_TYPES.map(a => stats.value.team[a.code] || 0)));
+const staffMax = computed(() => Math.max(1, ...stats.value.byStaff.map(p => p.total)));
 
-function barWidth(total) {
-  return (total / maxDayTotal.value) * 100;
+const chartCols = computed(() => {
+  const days = dateRange(chartFrom.value, toDay.value).map(date => {
+    const counts = { MORNING: 0, AFTERNOON: 0, NIGHT: 0 };
+    activities.value.forEach(a => {
+      if (a.shift_date === date && a.shift_code in counts) counts[a.shift_code] += 1;
+    });
+    return { date, counts, total: counts.MORNING + counts.AFTERNOON + counts.NIGHT };
+  });
+  const max = Math.max(1, ...days.map(d => d.total));
+  const many = days.length > 14;
+  return days.map(d => ({
+    date: d.date,
+    inRange: d.date >= fromDay.value,
+    short: d.date === today ? 'Today' : (many ? String(Number(d.date.slice(8))) : formatWorkDayShort(d.date).split(',')[0]),
+    title: `${formatWorkDayShort(d.date)} · ${d.total} total · Morning ${d.counts.MORNING} · Afternoon ${d.counts.AFTERNOON} · Night ${d.counts.NIGHT}`,
+    pct: Object.fromEntries(SHIFTS.map(s => [s.code, (d.counts[s.code] / max) * 100]))
+  }));
+});
+
+function barPct(count, max) {
+  return ((count || 0) / max) * 100;
 }
 
 function shareOf(count, total) {
@@ -293,23 +180,15 @@ function shareOf(count, total) {
 }
 
 function perDay(total) {
-  return Math.round((total / dayCount.value) * 10) / 10;
-}
-
-function scheduledNames(shiftCode) {
-  return staffProfiles.value
-    .filter(p => p.isActive && p.shiftCode === shiftCode)
-    .map(p => p.displayName)
-    .join(', ');
+  return Math.round(total / dayCount.value);
 }
 
 async function load() {
-  if (!endDay.value) return;
   const seq = ++loadSeq;
   isLoading.value = true;
   errorMessage.value = '';
   try {
-    const rows = await fetchActivities({ fromDate: fromDay.value, toDate: endDay.value });
+    const rows = await fetchActivities({ fromDate: chartFrom.value, toDate: toDay.value });
     if (seq === loadSeq) activities.value = rows;
   } catch (err) {
     if (seq === loadSeq) errorMessage.value = `Could not load statistics: ${err.message || err}`;
@@ -318,9 +197,70 @@ async function load() {
   }
 }
 
-watch(() => [fromDay.value, endDay.value, props.refreshKey], load);
+watch(() => [chartFrom.value, toDay.value, props.refreshKey], load);
 onMounted(() => {
   load();
   loadTeamRoster().catch(() => {});
 });
 </script>
+
+<style scoped>
+.stats { user-select: text; }
+.title-block { display: flex; flex-direction: column; gap: 1px; }
+.body { display: flex; flex-direction: column; gap: 16px; transition: opacity 150ms; }
+.body.is-loading { opacity: 0.55; }
+.small { font-size: 12px; }
+
+.totals { display: grid; grid-template-columns: 1.4fr repeat(5, minmax(0, 1fr)); }
+.total-tile { padding: 18px; display: flex; flex-direction: column; gap: 6px; background: var(--color-accent-900); color: var(--color-bg); }
+.kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-300); }
+.total-num { font-size: 52px; }
+.total-sub { font-size: 12px; color: var(--color-accent-200); }
+.act-tile { padding: 18px; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--color-divider); min-width: 0; }
+.act-num { font-size: 38px; }
+
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; }
+.chart { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+.chart-head { display: flex; align-items: center; gap: 14px; }
+.section-title { font-family: var(--font-heading); font-weight: 600; font-size: 20px; text-transform: uppercase; }
+.legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-neutral-700); }
+.swatch { width: 10px; height: 10px; }
+.columns { display: flex; align-items: flex-end; gap: 4px; height: 200px; border-bottom: 1px solid var(--color-divider); }
+.column { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
+.column:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.seg-bar { display: block; flex-shrink: 0; }
+.col-labels { display: flex; gap: 4px; }
+.col-labels > span { flex: 1; min-width: 0; text-align: center; font-size: 11px; color: var(--color-neutral-500); white-space: nowrap; overflow: hidden; }
+.col-labels > span.in-range { color: var(--color-neutral-700); }
+
+.shift-cards { display: flex; flex-direction: column; gap: 14px; }
+.shift-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.shift-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.shift-name { font-family: var(--font-heading); font-weight: 600; font-size: 18px; text-transform: uppercase; }
+.shift-hours { font-family: var(--font-body); font-weight: 400; font-size: 12px; color: var(--color-neutral-700); text-transform: none; }
+.shift-total { font-size: 26px; }
+.shift-acts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--color-divider); background: var(--color-bg); }
+.shift-act { display: flex; flex-direction: column; align-items: center; padding: 6px 2px; border-left: 1px solid var(--color-divider); }
+.shift-act:first-child { border-left: 0; }
+.shift-act-num { font-size: 17px; line-height: 1.2; }
+.shift-act-label { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-neutral-700); white-space: nowrap; }
+
+.staff-grid { grid-template-columns: minmax(0, 1.6fr) 110px repeat(5, minmax(0, 1fr)) minmax(0, 1.4fr); }
+.cb-grid-head.staff-grid > .pad, .staff-grid > .pad { padding-inline: 14px; }
+.right { text-align: right; }
+.num { font-family: var(--font-heading); font-size: 15px; }
+.person { display: flex; align-items: center; gap: 10px; }
+.avatar { width: 26px; height: 26px; font-size: 11px; }
+.strong { font-weight: 500; }
+.total-cell { display: flex; align-items: center; gap: 10px; }
+.staff-total { font-size: 17px; min-width: 32px; line-height: 1.2; }
+.staff-bar { flex: 1; height: 6px; }
+.empty { padding: 32px; text-align: center; font-size: 14px; color: var(--color-neutral-700); }
+
+@media (max-width: 1240px) {
+  .totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .act-tile:nth-child(4) { border-left: 0; }
+  .act-tile:nth-child(n + 4) { border-top: 1px solid var(--color-divider); }
+  .split { grid-template-columns: 1fr; }
+}
+</style>

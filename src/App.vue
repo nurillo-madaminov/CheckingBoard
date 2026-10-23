@@ -1,64 +1,55 @@
 <template>
   <!-- DEPLOYMENT NOT CONFIGURED: the database comes only from env variables -->
-  <div
-    v-if="!isSupabaseConfigured"
-    class="h-screen w-screen flex items-center justify-center bg-slate-900 p-6"
-  >
-    <div class="max-w-md bg-white rounded-2xl shadow-2xl p-6 text-sm text-slate-700 space-y-3">
-      <h1 class="text-lg font-black text-slate-900">CheckingBoard is not connected to its database</h1>
-      <p>
-        Set these environment variables where the frontend is built and deployed, then rebuild:
-      </p>
-      <pre class="bg-slate-100 rounded-lg p-3 text-xs font-mono text-slate-800">VITE_SUPABASE_URL=https://your-project.supabase.co
+  <div v-if="!isSupabaseConfigured" class="center-screen">
+    <div class="cb-dialog setup">
+      <span class="cb-dialog-title">CheckingBoard is not connected to its database</span>
+      <p class="cb-sub">Set these environment variables where the frontend is built and deployed, then rebuild:</p>
+      <pre class="setup-code">VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
     </div>
   </div>
 
   <!-- RESTORING SESSION -->
-  <div
-    v-else-if="authLoading"
-    class="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-300 text-sm font-semibold"
-  >
-    Loading CheckingBoard...
-  </div>
+  <div v-else-if="authLoading" class="center-screen loading">Loading CheckingBoard…</div>
 
-  <!-- IF VISITOR IS NOT LOGGED IN: SHOW LOGIN & CREATE A TEAM VIEW -->
-  <LoginView
-    v-else-if="!currentUser"
-  />
+  <!-- NOT SIGNED IN: SIGN IN / CREATE A TEAM -->
+  <LoginView v-else-if="!currentUser" />
 
-  <!-- AUTHENTICATED USER: MAIN CHECKINGBOARD SYSTEM -->
-  <div v-else class="h-screen w-screen flex flex-col overflow-hidden bg-slate-100 select-none">
-    <!-- Top Header Bar -->
-    <StatsBar
-      v-model:searchQuery="searchQuery"
+  <!-- SIGNED IN: SIDEBAR + CURRENT VIEW -->
+  <div v-else class="shell">
+    <SideNav
       :activeView="activeView"
       :currentUser="currentUser"
-      :canManageFleet="isManager"
       :teamName="currentTeam?.name || ''"
       :isLive="isLive"
-      @update:activeView="activeView = $event"
-      @open-staff-switch="showStaffModal = true"
+      :boardCount="tabCounts.CHECKING_BOARD"
+      :todayActivities="todayActivities"
+      :roster="staffProfiles"
+      @navigate="activeView = $event"
+      @open-staff="showStaffModal = true"
       @logout="handleLogout"
-      @open-add-company="openAddCompanyModal"
-      @open-config="showConfigModal = true"
-      @reset-data="handleResetData"
     />
-    <!-- Main Content Area: Dynamic View (Fleet Board | Logs | Shifts | Statistics) -->
-    <main class="flex-1 overflow-hidden relative">
-      <!-- 1. FLEET BOARD VIEW -->
+
+    <main class="main">
+      <!-- 1. BOARD -->
       <CheckingBoardTable
         v-if="activeView === 'fleet'"
+        v-model:searchQuery="searchQuery"
         :companies="companies"
         :drivers="drivers"
-        :currentTab="currentTab"
-        :searchQuery="searchQuery"
+        :tabs="tabs"
+        :activeTabId="activeTabId"
+        :tabCounts="tabCounts"
         :selectedDriverId="selectedDriverId"
         :canManageFleet="isManager"
+        :todayActivities="todayActivities"
+        :keyboardEnabled="!anyDialogOpen"
         @select-driver="selectedDriverId = $event"
+        @select-tab="activeTabId = $event"
+        @reorder-tabs="handleReorderTabs"
         @reorder-driver="handleReorderDriver"
         @reorder-company="handleReorderCompany"
-        @move-driver-to-company="handleMoveDriverToCompany"
+        @add-company="openAddCompanyModal"
         @add-driver="openAddDriverForCompany"
         @edit-driver="openEditDriverModal"
         @delete-driver="deleteDriver"
@@ -66,6 +57,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         @edit-company="openEditCompanyModal"
         @delete-company="deleteCompany"
         @log-action="handleDriverAction"
+        @reset-data="handleResetData"
       />
 
       <!-- 2. ACTION LOGS (staff: own records, manager: whole team) -->
@@ -78,27 +70,18 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       <!-- 3. SHIFT CONTROL PANEL (manager) -->
       <ShiftControlView
         v-else-if="activeView === 'shifts' && isManager"
-        @saved="showToast({ title: 'Shift schedule saved', message: 'New actions are credited to the updated shifts' })"
+        :refreshKey="activityVersion"
+        @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
       />
 
-      <!-- 4. DAILY STATISTICS (manager) -->
+      <!-- 4. STATISTICS (manager) -->
       <DailyStatisticsView
         v-else-if="activeView === 'statistics' && isManager"
         :refreshKey="activityVersion"
       />
     </main>
 
-    <!-- Excel-like Bottom Sheet Tabs (Only visible in Fleet View) -->
-    <BottomTabs
-      v-if="activeView === 'fleet'"
-      :tabs="tabs"
-      :activeTabId="activeTabId"
-      :counts="tabCounts"
-      @select-tab="activeTabId = $event"
-      @reorder-tabs="handleReorderTabs"
-    />
-
-    <!-- Staff Switch & Team Management Modal -->
+    <!-- Team & staff -->
     <StaffSwitchModal
       v-if="showStaffModal"
       @close="showStaffModal = false"
@@ -106,7 +89,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       @logout="handleLogout"
     />
 
-    <!-- Add / Edit Company Modal -->
+    <!-- Add / edit company -->
     <AddCompanyModal
       v-if="showCompanyModal"
       :editingCompany="editingCompany"
@@ -114,7 +97,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       @save="saveCompany"
     />
 
-    <!-- Add / Edit Driver Modal -->
+    <!-- Add / edit driver -->
     <AddDriverModal
       v-if="showDriverModal"
       :companies="companies"
@@ -124,84 +107,35 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       @save="saveDriver"
     />
 
-    <!-- Status & Color Config Modal -->
-    <StatusConfigModal
-      v-if="showConfigModal"
-      @close="showConfigModal = false"
+    <!-- Confirmations (delete, reset) -->
+    <ConfirmDialog
+      v-if="confirmState"
+      :title="confirmState.title"
+      :body="confirmState.body"
+      :okLabel="confirmState.ok"
+      @confirm="runConfirm"
+      @cancel="confirmState = null"
     />
 
-    <!-- Floating Alerts / Toasts (Top-Right Corner, click anywhere on card to close) -->
-    <div class="fixed top-3 right-3 z-50 flex flex-col items-end gap-2 pointer-events-none">
-      <transition-group
-        enter-active-class="transition ease-out duration-200"
-        enter-from-class="transform -translate-y-3 opacity-0 scale-95"
-        enter-to-class="transform translate-y-0 opacity-100 scale-100"
-        leave-active-class="transition ease-in duration-150"
-        leave-from-class="opacity-100 scale-100"
-        leave-to-class="opacity-0 scale-95"
-      >
+    <!-- Toasts (top right; click to dismiss) -->
+    <div class="toasts">
+      <transition-group name="toast">
         <div
           v-for="toast in toasts"
           :key="toast.id"
-          @click="removeToast(toast.id)"
-          :style="{
-            backgroundColor: toast.bgColor,
-            borderColor: toast.borderColor
-          }"
-          :class="toast.isError ? 'ring-2 ring-rose-300' : ''"
-          class="pointer-events-auto border rounded-2xl shadow-xl px-3.5 py-2 flex items-center gap-3 w-80 min-w-80 max-w-80 h-16 min-h-16 max-h-16 select-none cursor-pointer transition-all active:scale-95 hover:brightness-95"
+          :class="['toast', { 'is-error': toast.isError }]"
           title="Click to dismiss"
+          @click="removeToast(toast.id)"
         >
-          <!-- Status icon badge with matching accent color -->
-          <div
-            :style="{ backgroundColor: toast.iconBg }"
-            class="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-2xs"
-          >
-            {{ toast.isError ? '!' : '✓' }}
-          </div>
-
-          <!-- Alert content with uniform dimensions and prominent destination badge -->
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center justify-between gap-1">
-              <span
-                class="text-xs font-extrabold tracking-tight truncate"
-                :style="{ color: toast.textColor }"
-              >
-                {{ toast.driverName || toast.title }}
-              </span>
-              <span
-                class="text-[10px] font-mono font-medium shrink-0 opacity-75"
-                :style="{ color: toast.textColor }"
-              >
-                {{ toast.time }}
-              </span>
+          <span class="toast-mark" :style="{ background: toast.markColor }"></span>
+          <div class="toast-body">
+            <div class="toast-top">
+              <span class="toast-title cb-ellipsis">{{ toast.title }}</span>
+              <span class="toast-time">{{ toast.time }}</span>
             </div>
-
-            <!-- Obvious & easy-to-understand transferred location badge -->
-            <div v-if="toast.destTab" class="flex items-center gap-1.5 mt-0.5 truncate">
-              <span
-                class="text-[10px] font-bold uppercase tracking-wider opacity-85 shrink-0"
-                :style="{ color: toast.textColor }"
-              >
-                Transferred to:
-              </span>
-              <span
-                class="px-2 py-0.5 rounded text-[10px] font-black tracking-wide uppercase border bg-white/90 shadow-2xs truncate"
-                :style="{
-                  borderColor: toast.borderColor,
-                  color: toast.textColor
-                }"
-              >
-                {{ toast.destTab }}
-              </span>
-            </div>
-            <div
-              v-else-if="toast.message"
-              class="text-xs font-semibold mt-0.5 truncate"
-              :style="{ color: toast.textColor }"
-              :title="toast.message"
-            >
-              {{ toast.message }}
+            <div class="toast-line">
+              <span class="cb-ellipsis">{{ toast.message }}</span>
+              <span v-if="toast.destTab" class="tag tag-outline toast-dest">{{ toast.destTab }}</span>
             </div>
           </div>
         </div>
@@ -212,28 +146,30 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import StatsBar from './components/StatsBar.vue';
+import SideNav from './components/SideNav.vue';
 import CheckingBoardTable from './components/CheckingBoardTable.vue';
-import BottomTabs from './components/BottomTabs.vue';
 import AddCompanyModal from './components/AddCompanyModal.vue';
 import AddDriverModal from './components/AddDriverModal.vue';
-import StatusConfigModal from './components/StatusConfigModal.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
 import StaffSwitchModal from './components/StaffSwitchModal.vue';
 import ActivityLogView from './components/ActivityLogView.vue';
 import ShiftControlView from './components/ShiftControlView.vue';
 import DailyStatisticsView from './components/DailyStatisticsView.vue';
 import LoginView from './components/LoginView.vue';
 
-import { BOTTOM_TABS, getStatusConfig } from './config/statusConfig';
+import { BOTTOM_TABS, getStatusConfig, getStatusTab } from './config/statusConfig';
+import { currentWorkDay, clockTashkent } from './config/shifts';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import {
   currentStaffUser,
   currentTeam,
+  staffProfiles,
   initAuth,
   logoutUser
 } from './services/authService';
-import { recordActivity, getActionTypeConfig } from './services/activityService';
+import { recordActivity, fetchActivities, getActionTypeConfig } from './services/activityService';
 import * as db from './services/supabaseService';
+import { driverLabel as driverLabelOf } from './utils/format';
 
 // ---------------------------------------------------------------------------
 // State: everything comes from the shared team database
@@ -251,13 +187,11 @@ const searchQuery = ref('');
 const selectedDriverId = ref('');
 const showStaffModal = ref(false);
 const isLive = ref(false);
+// Today's action records (staff: their own, manager: the team) for the sidebar and KPI cards
+const todayActivities = ref([]);
 let signResetTimer = null;
+let todayTimer = null;
 let authSubscription = null;
-
-function driverLabelOf(driver) {
-  if (!driver) return '';
-  return driver.unit ? `${driver.unit} - ${driver.name}` : driver.name;
-}
 
 function sortCompanies(list) {
   return [...list].sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id));
@@ -355,22 +289,39 @@ async function runSignReset() {
   }
 }
 
+async function loadTodayActivities() {
+  try {
+    const day = currentWorkDay();
+    todayActivities.value = await fetchActivities({ fromDate: day, toDate: day });
+  } catch (err) {
+    console.warn('Could not load today\'s actions:', err);
+  }
+}
+
 async function enterTeam() {
   await loadFleet();
   setupRealtime();
+  loadTodayActivities();
   await runSignReset();
   if (signResetTimer) clearInterval(signResetTimer);
   // Midnight rollover without reloading: the database decides if a reset is due
   signResetTimer = setInterval(runSignReset, 60000);
+  // Teammates' actions show up in the sidebar and KPI cards within a minute
+  if (todayTimer) clearInterval(todayTimer);
+  todayTimer = setInterval(loadTodayActivities, 60000);
 }
 
 function leaveTeam() {
   if (signResetTimer) clearInterval(signResetTimer);
+  if (todayTimer) clearInterval(todayTimer);
   signResetTimer = null;
+  todayTimer = null;
   db.unsubscribeFromRealtime();
   isLive.value = false;
   companies.value = [];
   drivers.value = [];
+  todayActivities.value = [];
+  confirmState.value = null;
   activeView.value = 'fleet';
   showStaffModal.value = false;
 }
@@ -433,56 +384,19 @@ async function handleLogout() {
 // Toast / Alert Notification System
 // ---------------------------------------------------------------------------
 const toasts = ref([]);
-function showToast({
-  title = 'Events up to date',
-  message = '',
-  status = null,
-  driverName = '',
-  destTab = '',
-  isError = false
-}) {
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// title / message / destTab (the sheet tab a driver moved to) / status (colors the mark)
+function showToast({ title = 'Up to date', message = '', status = null, destTab = '', isError = false }) {
   const id = `toast-${Date.now()}-${Math.random()}`;
-
-  let bgColor = '#eaffea';
-  let borderColor = '#86efac';
-  let textColor = '#065f46';
-  let iconBg = '#047857';
-
+  let markColor = 'var(--color-accent)';
   if (isError) {
-    bgColor = '#FFE4E6';
-    borderColor = '#FDA4AF';
-    textColor = '#9F1239';
-    iconBg = '#E11D48';
+    markColor = 'var(--color-signal)';
   } else if (status) {
-    const config = getStatusConfig(status);
-    if (config) {
-      bgColor = config.bgColor || bgColor;
-      borderColor = config.borderColor || borderColor;
-      textColor = config.textColor || textColor;
-      iconBg = config.color || config.textColor || iconBg;
-    }
+    const look = getStatusConfig(status).look;
+    if (look && look.background !== 'transparent') markColor = look.background;
   }
-
-  toasts.value.push({
-    id,
-    title,
-    message,
-    driverName,
-    destTab,
-    status,
-    isError,
-    time: timeStr,
-    bgColor,
-    borderColor,
-    textColor,
-    iconBg
-  });
-
-  setTimeout(() => {
-    removeToast(id);
-  }, isError ? 7000 : 4000);
+  // Keep at most four on screen
+  toasts.value = [...toasts.value, { id, title, message, destTab, isError, markColor, time: clockTashkent() }].slice(-4);
+  setTimeout(() => removeToast(id), isError ? 7000 : 4000);
 }
 
 function showErrorToast(title, message) {
@@ -491,11 +405,6 @@ function showErrorToast(title, message) {
 
 function removeToast(id) {
   toasts.value = toasts.value.filter(t => t.id !== id);
-}
-
-function getDestinationTab(status) {
-  const tab = BOTTOM_TABS.find(t => t.id !== 'CHECKING_BOARD' && t.filterFn({ status }));
-  return tab ? tab.label : 'CHECKING BOARD';
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +417,23 @@ const showDriverModal = ref(false);
 const editingDriver = ref(null);
 const targetCompanyId = ref('');
 
-const showConfigModal = ref(false);
+// Confirmation dialog: { title, body, ok, onConfirm }
+const confirmState = ref(null);
+
+function askConfirm(state) {
+  confirmState.value = state;
+}
+
+async function runConfirm() {
+  const state = confirmState.value;
+  confirmState.value = null;
+  if (state) await state.onConfirm();
+}
+
+// Board shortcuts pause while any dialog is open
+const anyDialogOpen = computed(() =>
+  showStaffModal.value || showCompanyModal.value || showDriverModal.value || !!confirmState.value
+);
 
 // Tab order is a personal view preference of this browser (not fleet data)
 const TAB_ORDER_KEY = 'checkingboard_tabs_order_v1';
@@ -542,10 +467,6 @@ function loadSavedTabs() {
 
 const tabs = ref(loadSavedTabs());
 
-const currentTab = computed(() => {
-  return tabs.value.find(t => t.id === activeTabId.value) || tabs.value[0];
-});
-
 // Real-time Counts for all tabs (Excludes INACTIVE drivers from main tab and all count)
 const tabCounts = computed(() => {
   const allDrivers = drivers.value;
@@ -557,7 +478,8 @@ const tabCounts = computed(() => {
     READY: allDrivers.filter(d => d.status === 'READY').length,
     COVERED: allDrivers.filter(d => d.status === 'COVERED').length,
     GOING_TO_DEL: allDrivers.filter(d => ['GOING DEL', 'GOING TO DEL'].includes(d.status)).length,
-    HOME_INACTIVE: allDrivers.filter(d => ['HOME', 'INACTIVE', 'SHOP'].includes(d.status)).length
+    HOME: allDrivers.filter(d => ['HOME', 'SHOP'].includes(d.status)).length,
+    INACTIVE: allDrivers.filter(d => d.status === 'INACTIVE').length
   };
 });
 
@@ -608,6 +530,7 @@ async function handleDriverAction({ actionType, driver, extraNote = '' }) {
       extraNote: extraNote || `${actionConfig.label} performed for ${driverLabel}`
     });
     activityVersion.value += 1;
+    loadTodayActivities();
   } catch (err) {
     showErrorToast('Action not recorded', errorText(err));
     return;
@@ -615,9 +538,8 @@ async function handleDriverAction({ actionType, driver, extraNote = '' }) {
 
   // 3. Show alert
   showToast({
-    title: actionConfig.label,
-    driverName: driverLabel,
-    message: `${driverLabel}: ${actionConfig.label} logged by ${currentUser.value?.displayName}`
+    title: `${actionConfig.label} logged`,
+    message: `${driverLabel} · by ${currentUser.value?.displayName}`
   });
 }
 
@@ -664,19 +586,24 @@ async function saveCompany(companyData) {
 
 // Manager only. Deleting a company never touches past action records
 // (their links are set to NULL; the name snapshots stay).
-async function deleteCompany(companyId) {
+function deleteCompany(companyId) {
   if (!isManager.value) return;
   const comp = companies.value.find(c => c.id === companyId);
   const name = comp ? comp.name : 'this company';
   const driverCount = drivers.value.filter(d => d.companyId === companyId).length;
 
-  if (!confirm(`Are you sure you want to delete ${name}?${driverCount > 0 ? ` This will also delete ${driverCount} driver(s).` : ''}`)) {
-    return;
-  }
-
-  companies.value = companies.value.filter(c => c.id !== companyId);
-  drivers.value = drivers.value.filter(d => d.companyId !== companyId);
-  await persist(db.deleteCompany(companyId), 'Company not deleted');
+  askConfirm({
+    title: `Delete ${name}?`,
+    body: `${driverCount > 0 ? `This also removes ${driverCount} driver${driverCount === 1 ? '' : 's'} from the board. ` : ''}Past log entries keep the company and driver names.`,
+    ok: 'Delete company',
+    onConfirm: async () => {
+      companies.value = companies.value.filter(c => c.id !== companyId);
+      drivers.value = drivers.value.filter(d => d.companyId !== companyId);
+      if (await persist(db.deleteCompany(companyId), 'Company not deleted')) {
+        showToast({ title: 'Company deleted', message: name });
+      }
+    }
+  });
 }
 
 // Company Reordering: only companies whose position changed are saved
@@ -726,14 +653,11 @@ function closeDriverModal() {
 }
 
 function statusToast(driver) {
-  const destTab = getDestinationTab(driver.status);
-  const driverLabel = driverLabelOf(driver);
   showToast({
-    title: 'Status Updated',
-    driverName: driverLabel,
-    destTab,
-    status: driver.status,
-    message: `${driverLabel} transferred to [${destTab}] tab`
+    title: driverLabelOf(driver),
+    message: 'Moved to',
+    destTab: getStatusTab(driver.status).label,
+    status: driver.status
   });
 }
 
@@ -781,14 +705,11 @@ async function saveDriver(driverData) {
   drivers.value = sortDrivers([...drivers.value, newDriver]);
   if (!(await persist(db.insertDriver(newDriver), 'Driver not added'))) return;
 
-  const driverName = driverLabelOf(newDriver);
-  const destTab = getDestinationTab(newDriver.status);
   showToast({
-    title: 'Driver Added',
-    driverName,
-    destTab,
-    status: newDriver.status,
-    message: `${driverName} added to [${destTab}] tab`
+    title: 'Driver added',
+    message: `${driverLabelOf(newDriver)} →`,
+    destTab: getStatusTab(newDriver.status).label,
+    status: newDriver.status
   });
 }
 
@@ -840,43 +761,68 @@ async function handleReorderDriver({ draggedId, targetId, position }) {
   await persist(db.saveDriverOrder(changed), 'Driver order not saved');
 }
 
-async function handleMoveDriverToCompany({ driverId, targetCompanyId: toCompanyId }) {
-  const idx = drivers.value.findIndex(d => d.id === driverId);
-  if (idx === -1) return;
-  const updated = { ...drivers.value[idx], companyId: toCompanyId };
-  drivers.value[idx] = updated;
-  selectedDriverId.value = driverId;
-  await persist(db.updateDriver(updated), 'Transfer not saved');
-}
-
 // Manager only. Deleting a driver never touches past action records
 // (the link is set to NULL; the name snapshot stays).
-async function deleteDriver(driverId) {
+function deleteDriver(driverId) {
   if (!isManager.value) return;
   const driver = drivers.value.find(d => d.id === driverId);
   const label = driver ? driverLabelOf(driver) : 'this driver';
 
-  if (!confirm(`Are you sure you want to delete driver ${label}?`)) {
-    return;
-  }
-
-  drivers.value = drivers.value.filter(d => d.id !== driverId);
-  await persist(db.deleteDriver(driverId), 'Driver not deleted');
+  askConfirm({
+    title: `Delete ${label}?`,
+    body: 'The driver is removed from the board. Past log entries keep the driver\'s name.',
+    ok: 'Delete driver',
+    onConfirm: async () => {
+      drivers.value = drivers.value.filter(d => d.id !== driverId);
+      if (selectedDriverId.value === driverId) selectedDriverId.value = '';
+      if (await persist(db.deleteDriver(driverId), 'Driver not deleted')) {
+        showToast({ title: 'Driver deleted', message: `${label} · logs kept` });
+      }
+    }
+  });
 }
 
-async function handleResetData() {
-  if (!confirm('Reset active drivers status to READY and mark rows RED (needs check ASAP)? Inactive drivers will remain inactive.')) {
-    return;
-  }
-  drivers.value = drivers.value.map(d =>
-    d.status === 'INACTIVE' ? d : { ...d, status: 'READY', lastCheckedAt: null }
-  );
-  if (await persist(db.resetActiveDrivers(), 'Fleet reset failed')) {
-    db.broadcastFleetReset();
-    showToast({
-      title: 'Events up to date',
-      message: 'Active drivers reset to READY (Inactive unchanged)'
-    });
-  }
+function handleResetData() {
+  askConfirm({
+    title: 'Reset fleet to READY?',
+    body: 'Every active driver goes to READY and is marked overdue, so the next check round starts clean. Inactive drivers stay inactive. Teammates see the reset live.',
+    ok: 'Reset fleet',
+    onConfirm: async () => {
+      drivers.value = drivers.value.map(d =>
+        d.status === 'INACTIVE' ? d : { ...d, status: 'READY', lastCheckedAt: null }
+      );
+      if (await persist(db.resetActiveDrivers(), 'Fleet reset failed')) {
+        db.broadcastFleetReset();
+        showToast({ title: 'Fleet reset to READY', message: 'Inactive drivers unchanged' });
+      }
+    }
+  });
 }
 </script>
+
+<style scoped>
+.shell { height: 100vh; display: flex; overflow: hidden; background: var(--color-surface); user-select: none; }
+.main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+
+.center-screen { height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--color-surface); }
+.loading { font-family: var(--font-heading); font-size: 18px; color: var(--color-neutral-700); }
+.setup { width: min(520px, 100%); }
+.setup-code { margin: 0; padding: 12px; font-size: 12px; background: var(--color-bg); border: 1px solid var(--color-divider); white-space: pre-wrap; }
+
+.toasts { position: fixed; top: 16px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast {
+  pointer-events: auto; width: 320px; height: 64px; padding: 10px 14px; cursor: pointer;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--color-neutral-100); border: 1px solid var(--color-divider); box-shadow: var(--shadow-md);
+}
+.toast.is-error { border-color: color-mix(in srgb, var(--color-signal) 45%, transparent); }
+.toast-mark { width: 4px; align-self: stretch; flex-shrink: 0; }
+.toast-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.toast-top { display: flex; justify-content: space-between; gap: 8px; }
+.toast-title { font-size: 13px; font-weight: 600; }
+.toast-time { font-family: var(--font-heading); font-size: 12px; color: var(--color-neutral-600); flex-shrink: 0; }
+.toast-line { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-neutral-700); min-width: 0; }
+.toast-dest { font-family: var(--font-heading); font-size: 11px; }
+.toast-enter-active, .toast-leave-active { transition: opacity 150ms, transform 150ms; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-6px); }
+</style>

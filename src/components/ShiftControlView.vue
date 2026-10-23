@@ -1,121 +1,75 @@
 <template>
-  <div class="h-full overflow-auto bg-slate-100 p-4 md:p-6 space-y-5 select-text">
-    <!-- Header -->
-    <header class="flex items-center justify-between flex-wrap gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-      <div>
-        <h2 class="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
-          <span>🗓️ Shift Control Panel</span>
-          <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300">
-            Manager Access
-          </span>
-        </h2>
-        <p class="text-xs text-slate-500 mt-0.5">
-          {{ STAFF_PER_SHIFT }} staff per shift. Hours are Tashkent time (UTC+5); US Eastern shown for today.
-          Every action is credited to the shift its author is assigned to when they click it.
-        </p>
+  <div class="cb-page cb-scroll">
+    <div class="cb-page-head">
+      <div class="title-block">
+        <h2 class="cb-title">Shifts</h2>
+        <span class="cb-sub">{{ STAFF_PER_SHIFT }} staff per shift. New actions are credited to the shift their author is assigned to.</span>
       </div>
-
-      <div class="flex items-center gap-2">
-        <span v-if="isDirty" class="text-xs font-semibold text-amber-700">Unsaved changes</span>
-        <button
-          v-if="isDirty"
-          @click="resetDraft"
-          :disabled="isSaving"
-          class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition-colors"
-        >
-          Discard
-        </button>
-        <button
-          @click="save"
-          :disabled="!isDirty || isSaving"
-          class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white text-xs font-bold shadow-2xs transition-all active:scale-95"
-        >
-          {{ isSaving ? 'Saving...' : 'Save Schedule' }}
-        </button>
-      </div>
-    </header>
-
-    <div
-      v-if="errorMessage"
-      class="p-3 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200 flex items-center justify-between"
-    >
-      <span>{{ errorMessage }}</span>
-      <button @click="errorMessage = ''" class="font-bold opacity-70 hover:opacity-100">✕</button>
+      <div class="cb-spacer"></div>
+      <span v-if="isDirty" class="unsaved">Unsaved changes</span>
+      <button class="btn btn-secondary" :disabled="!isDirty || isSaving" @click="resetDraft">Discard</button>
+      <button class="btn btn-primary" :disabled="!isDirty || isSaving" @click="save">{{ isSaving ? 'Saving…' : 'Save schedule' }}</button>
     </div>
 
-    <!-- Shift cards -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <div
-        v-for="shift in SHIFTS"
-        :key="shift.code"
-        class="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col"
-      >
-        <div class="px-4 py-3 border-b border-slate-100 flex items-start justify-between gap-2" :style="{ borderTop: `4px solid ${shift.accent}` }">
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="text-xl">{{ shift.icon }}</span>
-              <h3 class="font-black text-slate-900 text-sm">{{ shift.label }} Shift</h3>
-              <span
-                v-if="onDuty.includes(shift.code)"
-                class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1"
-              >
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                On duty now
-              </span>
-            </div>
-            <div class="mt-1 text-xs font-mono font-bold text-slate-800">{{ hoursOf(shift.code).tashkent }} <span class="font-sans font-semibold text-slate-400">Tashkent</span></div>
-            <div class="text-[11px] font-mono text-slate-500">{{ hoursOf(shift.code).eastern }}</div>
-          </div>
-          <span class="text-[11px] font-bold text-slate-500 shrink-0">
-            {{ filledCount(shift.code) }}/{{ STAFF_PER_SHIFT }}
-          </span>
-        </div>
+    <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
-        <div class="p-4 space-y-2.5 flex-1">
-          <div v-for="slot in STAFF_PER_SHIFT" :key="slot" class="flex flex-col gap-1">
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Staff {{ slot }}</label>
+    <div class="cards">
+      <div v-for="shift in SHIFTS" :key="shift.code" class="cb-panel card">
+        <div :class="['card-head', { 'is-on': onDuty.includes(shift.code) }]">
+          <div class="card-title-row">
+            <span class="card-title">{{ shift.label }}</span>
+            <span v-if="onDuty.includes(shift.code)" class="duty">On duty now</span>
+          </div>
+          <span class="tas">{{ hoursOf(shift.code).tashkent }} <span class="tas-unit">TAS</span></span>
+          <span class="et">{{ hoursOf(shift.code).eastern }}</span>
+        </div>
+        <div class="card-body">
+          <div v-for="slot in STAFF_PER_SHIFT" :key="slot" class="field">
+            <label :for="`slot-${shift.code}-${slot}`">Slot {{ slot }}</label>
             <select
+              :id="`slot-${shift.code}-${slot}`"
               :value="draft[shift.code][slot - 1]"
+              class="input slot"
               @change="assign(shift.code, slot - 1, $event.target.value)"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500',
-                draft[shift.code][slot - 1] ? 'border-slate-300 bg-white text-slate-900' : 'border-dashed border-slate-300 bg-slate-50 text-slate-400'
-              ]"
             >
-              <option value="">— Empty —</option>
+              <option value="">— Empty slot —</option>
               <option v-for="member in activeMembers" :key="member.id" :value="member.id">
-                {{ member.displayName }}{{ member.role === 'manager' ? ' (manager)' : '' }}{{ otherShiftLabel(member.id, shift.code) }}
+                {{ member.displayName }}{{ otherShiftLabel(member.id, shift.code) }}
               </option>
             </select>
           </div>
+          <div class="week">
+            <span>Actions last 7 days</span>
+            <span class="week-num">{{ weekCounts[shift.code] ?? '…' }}</span>
+          </div>
         </div>
       </div>
-    </section>
+    </div>
 
-    <!-- Unassigned -->
-    <section class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-      <h3 class="text-sm font-extrabold text-slate-900 mb-1">Not on any shift</h3>
-      <p class="text-[11px] text-slate-500 mb-3">
-        Actions by someone with no shift are placed by the clock (Tashkent 07:00–15:00 Morning, 15:00–23:00 Afternoon, 23:00–07:00 Night).
-      </p>
-      <div v-if="unassigned.length" class="flex flex-wrap gap-2">
-        <span
-          v-for="member in unassigned"
-          :key="member.id"
-          class="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700"
-        >
-          {{ member.role === 'manager' ? '👑' : '👤' }} {{ member.displayName }}
+    <div class="cb-panel unassigned">
+      <span class="cb-label">Unassigned · {{ unassigned.length }}</span>
+      <div class="chips">
+        <span v-for="member in unassigned" :key="member.id" class="chip">
+          <span class="cb-avatar chip-avatar">{{ initials(member.displayName) }}</span>{{ member.displayName }}
         </span>
+        <span v-if="!unassigned.length" class="cb-sub">Every staff member is on a shift.</span>
       </div>
-      <p v-else class="text-xs text-slate-400">Everyone is scheduled.</p>
-    </section>
+      <span class="cb-sub small">Actions by unassigned staff are placed by the clock. The 13:00–15:00 overlap counts as Morning.</span>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
-import { SHIFTS, STAFF_PER_SHIFT, getShiftConfig, shiftHours, shiftsOnDuty, currentWorkDay } from '../config/shifts';
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
+import { SHIFTS, STAFF_PER_SHIFT, getShiftConfig, shiftHours, shiftsOnDuty, currentWorkDay, addDays } from '../config/shifts';
 import { staffProfiles, loadTeamRoster, saveShiftSchedule } from '../services/authService';
+import { fetchActivities } from '../services/activityService';
+import { initials } from '../utils/format';
+
+const props = defineProps({
+  // Bumped by the app after this user records an action
+  refreshKey: { type: Number, default: 0 }
+});
 
 const emit = defineEmits(['saved']);
 
@@ -125,6 +79,7 @@ const isSaving = ref(false);
 const errorMessage = ref('');
 const onDuty = ref(shiftsOnDuty());
 const today = ref(currentWorkDay());
+const weekCounts = ref({});
 let clockTimer = null;
 
 // The schedule as it is saved in the database
@@ -171,15 +126,21 @@ function otherShiftLabel(memberId, shiftCode) {
   return code && code !== shiftCode ? ` — on ${getShiftConfig(code).label}` : '';
 }
 
-function filledCount(shiftCode) {
-  return draft[shiftCode].filter(Boolean).length;
-}
-
 function hoursOf(shiftCode) {
   return shiftHours(shiftCode, today.value);
 }
 
-const unassigned = computed(() => activeMembers.value.filter(m => !shiftOf(m.id)));
+// Managers usually don't work a dispatch shift, so they are not listed as unassigned
+const unassigned = computed(() => activeMembers.value.filter(m => m.role !== 'manager' && !shiftOf(m.id)));
+
+async function loadWeekCounts() {
+  try {
+    const rows = await fetchActivities({ fromDate: addDays(today.value, -6), toDate: today.value });
+    weekCounts.value = Object.fromEntries(SHIFTS.map(s => [s.code, rows.filter(r => r.shift_code === s.code).length]));
+  } catch (err) {
+    console.warn('Could not load weekly shift counts:', err);
+  }
+}
 
 async function save() {
   isSaving.value = true;
@@ -196,9 +157,12 @@ async function save() {
   }
 }
 
+watch(() => props.refreshKey, loadWeekCounts);
+
 onMounted(() => {
   resetDraft();
   loadTeamRoster().then(resetDraft).catch(err => { errorMessage.value = err.message; });
+  loadWeekCounts();
   clockTimer = setInterval(() => {
     onDuty.value = shiftsOnDuty();
     today.value = currentWorkDay();
@@ -207,3 +171,37 @@ onMounted(() => {
 
 onUnmounted(() => clearInterval(clockTimer));
 </script>
+
+<style scoped>
+.title-block { display: flex; flex-direction: column; gap: 1px; }
+.unsaved { font-size: 13px; color: var(--color-accent-700); }
+
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.card { display: flex; flex-direction: column; }
+.card-head {
+  padding: 16px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--color-neutral-200); color: var(--color-text); border-bottom: 1px solid var(--color-divider);
+}
+.card-head.is-on { background: var(--color-accent-900); color: var(--color-bg); }
+.card-title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-title { font-family: var(--font-heading); font-weight: 600; font-size: 24px; text-transform: uppercase; }
+.duty { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; background: var(--color-accent); color: var(--color-bg); padding: 3px 7px; }
+.tas { font-family: var(--font-heading); font-size: 18px; }
+.tas-unit { font-size: 13px; opacity: 0.7; }
+.et { font-size: 12px; opacity: 0.75; }
+.card-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.slot { font-size: 14px; background-color: var(--color-bg); }
+.week { display: flex; justify-content: space-between; font-size: 12px; color: var(--color-neutral-700); padding-top: 4px; }
+.week-num { font-family: var(--font-heading); font-size: 15px; color: var(--color-text); }
+
+.unassigned { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 10px 3px 3px;
+  border: 1px solid var(--color-divider); background: var(--color-bg);
+}
+.chip-avatar { width: 22px; height: 22px; font-size: 9px; }
+.small { font-size: 12px; }
+
+@media (max-width: 1100px) { .cards { grid-template-columns: 1fr; } }
+</style>

@@ -66,15 +66,6 @@ export function dateRange(startDate, endDate) {
   return days;
 }
 
-// 'YYYY-MM-DD' minus one calendar month, plus one day (an inclusive 1-month window ending on dateStr)
-export function monthWindowStart(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  // Clamp to the previous month's length (Mar 31 -> window starts Mar 1, not Mar 4)
-  const prevMonthDays = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
-  const dt = new Date(Date.UTC(y, m - 2, Math.min(d, prevMonthDays) + 1));
-  return dt.toISOString().substring(0, 10);
-}
-
 function tashkentParts(date) {
   const shifted = new Date(date.getTime() + TASHKENT_UTC_OFFSET_HOURS * 3600 * 1000);
   return {
@@ -131,6 +122,52 @@ export function shiftHours(shiftCode, workDay = currentWorkDay()) {
     tashkent: `${pad(s.start)}:00 – ${pad(s.end)}:00`,
     eastern: `${formatEastern(start)} – ${formatEastern(end)} ET`
   };
+}
+
+/**
+ * How far the shift on the clock has run: { code, pct, left: '7h 18m left' }
+ */
+export function shiftProgress(now = new Date()) {
+  const code = currentShiftCode(now);
+  const s = getShiftConfig(code);
+  const day = currentWorkDay(now);
+  const start = tashkentInstant(day, s.start);
+  const end = tashkentInstant(s.end <= s.start ? addDays(day, 1) : day, s.end);
+  const total = end - start;
+  const leftMin = Math.max(0, Math.round((end - now) / 60000));
+  return {
+    code,
+    start,
+    end,
+    pct: Math.max(0, Math.min(100, ((now - start) / total) * 100)),
+    left: `${Math.floor(leftMin / 60)}h ${pad(leftMin % 60)}m left`
+  };
+}
+
+// Wall clocks for the sidebar: '07:42' in Tashkent, '10:42 PM' in US Eastern
+export function clockTashkent(now = new Date()) {
+  return now.toLocaleTimeString('en-GB', { timeZone: SHIFT_TIMEZONE, hour: '2-digit', minute: '2-digit' });
+}
+
+export function clockEastern(now = new Date()) {
+  return now.toLocaleTimeString('en-US', { timeZone: REPORT_TIMEZONE, hour: 'numeric', minute: '2-digit' });
+}
+
+// '14:05' Tashkent and '5:05 AM' Eastern for one timestamp (log rows)
+export function formatTashkentClock(iso) {
+  return clockTashkent(new Date(iso));
+}
+
+export function formatEasternClock(iso) {
+  return clockEastern(new Date(iso));
+}
+
+// 'Thu, Oct 22' (short work-day label)
+export function formatWorkDayShort(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
+    timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric'
+  });
 }
 
 export function formatTashkentTime(iso) {

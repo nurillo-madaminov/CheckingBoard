@@ -1,256 +1,90 @@
 <template>
-  <div class="h-full flex flex-col bg-white overflow-hidden select-text">
-    <!-- Filters -->
-    <header class="bg-slate-50 border-b border-slate-200 px-4 py-3 shrink-0 flex flex-col gap-3">
-      <div class="flex items-center justify-between flex-wrap gap-2">
-        <div class="flex items-center gap-3">
-          <div class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
-            📜
-          </div>
-          <div>
-            <h2 class="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-              <span>Action Logs</span>
-              <span
-                :class="[
-                  'text-[10px] font-bold px-2 py-0.5 rounded-full border',
-                  isManager
-                    ? 'bg-purple-100 text-purple-800 border-purple-300'
-                    : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                ]"
-              >
-                {{ isManager ? 'Manager View (All Staff)' : 'Staff View (Your Records Only)' }}
-              </span>
-            </h2>
-            <p class="text-[11px] text-slate-500">
-              Recorded only when someone clicks an action button (Shift, Cycle, Fix Log, Break, Connect). Records cannot be edited or deleted.
-            </p>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-2 text-xs">
-          <span class="text-slate-500 font-medium">Records:</span>
-          <span class="px-2.5 py-0.5 font-bold rounded-full bg-slate-200 text-slate-800 border border-slate-300">
-            {{ isLoading ? '…' : visibleActivities.length }}
-          </span>
-          <button
-            @click="load"
-            class="px-2 py-1 rounded-md bg-white hover:bg-slate-100 border border-slate-300 font-semibold text-slate-700"
-            title="Reload from the database"
-          >
-            ↻ Refresh
-          </button>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap items-end gap-3 text-xs">
-        <!-- Work day -->
-        <div class="flex flex-col gap-1">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Work Day</label>
-          <div class="flex items-center gap-1">
-            <button @click="shiftDay(-1)" class="px-2 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 font-bold" title="Previous day">◀</button>
-            <input
-              v-model="filters.day"
-              type="date"
-              :max="today"
-              class="px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-            <button @click="shiftDay(1)" :disabled="filters.day >= today" class="px-2 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 font-bold disabled:opacity-40" title="Next day">▶</button>
-            <button
-              v-if="filters.day !== today"
-              @click="filters.day = today"
-              class="px-2 py-1.5 text-indigo-600 hover:text-indigo-800 font-semibold"
-            >
-              Today
-            </button>
-          </div>
-        </div>
-
-        <!-- Shift (manager only: staff see just the actions they recorded) -->
-        <div v-if="isManager" class="flex flex-col gap-1">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Shift</label>
-          <div class="flex items-center gap-0.5 bg-slate-200/70 p-0.5 rounded-lg font-semibold">
-            <button
-              v-for="opt in shiftOptions"
-              :key="opt.code"
-              @click="filters.shift = opt.code"
-              :class="[
-                'px-2.5 py-1 rounded-md transition-colors',
-                filters.shift === opt.code ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
-              ]"
-            >
-              {{ opt.icon }} {{ opt.label }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Staff (manager only) -->
-        <div v-if="isManager" class="flex flex-col gap-1">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Staff Member</label>
-          <select
-            v-model="filters.staffUserId"
-            class="px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="">All staff</option>
-            <option v-for="staff in staffProfiles" :key="staff.id" :value="staff.id">
-              {{ staff.displayName }}
-            </option>
-          </select>
-        </div>
-
-        <!-- Action -->
-        <div class="flex flex-col gap-1">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Action</label>
-          <select
-            v-model="filters.actionType"
-            class="px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="">All actions</option>
-            <option v-for="act in ACTION_TYPES" :key="act.code" :value="act.code">
-              {{ act.icon }} {{ act.label }}
-            </option>
-          </select>
-        </div>
-
-        <!-- Driver search -->
-        <div class="flex flex-col gap-1 min-w-[180px] flex-1 max-w-xs">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Driver / Company</label>
-          <input
-            v-model="filters.search"
-            type="text"
-            placeholder="Search driver, unit or company..."
-            class="px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-        </div>
-      </div>
-
-      <!-- What is being shown -->
-      <div class="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
-        <span class="font-bold text-slate-800">{{ formatWorkDay(filters.day) }}</span>
-        <template v-if="!isManager">
-          <span>·</span>
-          <span>Actions you recorded</span>
-        </template>
-        <template v-else-if="filters.shift">
-          <span>·</span>
-          <span>{{ selectedShift.icon }} {{ selectedShift.label }} shift</span>
-          <span class="font-mono">{{ selectedShiftHours.tashkent }} Tashkent</span>
-          <span class="font-mono text-slate-400">({{ selectedShiftHours.eastern }})</span>
-        </template>
-        <template v-else>
-          <span>·</span>
-          <span>All 3 shifts (Tashkent 07:00 to 07:00 next day)</span>
-        </template>
-        <span class="ml-auto flex items-center gap-1.5">
-          <span
-            v-for="act in ACTION_TYPES"
-            :key="act.code"
-            :class="['px-1.5 py-0.5 rounded border font-bold', act.color]"
-            :title="act.label"
-          >
-            {{ act.icon }} {{ actionCounts[act.code] || 0 }}
-          </span>
+  <div class="cb-page cb-scroll logs">
+    <div class="cb-page-head">
+      <div class="title-block">
+        <h2 class="cb-title">Logs</h2>
+        <span class="cb-sub">
+          {{ isManager ? 'All team actions' : 'Your own actions' }} for the work day (07:00 – 07:00 Tashkent)
         </span>
       </div>
-    </header>
+      <div class="cb-spacer"></div>
 
-    <div v-if="errorMessage" class="px-4 py-2 text-xs font-semibold bg-rose-50 text-rose-800 border-b border-rose-200">
-      {{ errorMessage }}
+      <!-- Work day -->
+      <div class="stepper">
+        <button class="btn btn-ghost btn-icon step" title="Previous day" @click="shiftDay(-1)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+        <label class="day" :title="'Pick a day'">
+          <span>{{ dayLabel }}</span>
+          <input v-model="filters.day" type="date" :max="today" class="day-input" />
+        </label>
+        <button class="btn btn-ghost btn-icon step" title="Next day" :disabled="filters.day >= today" @click="shiftDay(1)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+      </div>
+
+      <!-- Shift (manager only: staff see just the actions they recorded) -->
+      <div v-if="isManager" class="seg">
+        <button
+          v-for="opt in shiftOptions"
+          :key="opt.code"
+          :class="['seg-btn', { 'is-on': filters.shift === opt.code }]"
+          @click="filters.shift = opt.code"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+
+      <select v-if="isManager" v-model="filters.staffUserId" class="input compact staff-select">
+        <option value="">All staff</option>
+        <option v-for="staff in staffProfiles" :key="staff.id" :value="staff.id">{{ staff.displayName }}</option>
+      </select>
+
+      <input v-model="filters.search" class="input compact search" placeholder="Search driver or company" />
     </div>
 
-    <!-- Table -->
-    <div class="flex-1 overflow-auto">
-      <table class="w-full text-left table-grid border-separate table-fixed">
-        <colgroup>
-          <col style="width: 52px;" />
-          <col style="width: 150px;" />
-          <col style="width: 120px;" />
-          <col style="width: 170px;" />
-          <col style="width: 240px;" />
-          <col style="width: 140px;" />
-          <col />
-        </colgroup>
+    <!-- Counts (click to filter by action) -->
+    <div class="cb-panel counts">
+      <button
+        v-for="k in countTiles"
+        :key="k.code"
+        :class="['count', { 'is-on': filters.actionType === k.code }]"
+        @click="filters.actionType = k.code"
+      >
+        <span class="cb-num count-num">{{ k.count }}</span>
+        <span class="cb-label">{{ k.label }}</span>
+      </button>
+    </div>
 
-        <thead class="sticky top-0 z-20 bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-wider shadow-xs">
-          <tr>
-            <th class="px-2 py-2.5 border-b border-r border-slate-300 text-center bg-slate-200/90">#</th>
-            <th class="px-3 py-2.5 border-b border-r border-slate-300">Time</th>
-            <th class="px-3 py-2.5 border-b border-r border-slate-300">Shift</th>
-            <th class="px-3 py-2.5 border-b border-r border-slate-300">Staff Member</th>
-            <th class="px-3 py-2.5 border-b border-r border-slate-300">Driver</th>
-            <th class="px-3 py-2.5 border-b border-r border-slate-300 text-center">Action</th>
-            <th class="px-4 py-2.5 border-b border-slate-300">Note</th>
-          </tr>
-        </thead>
+    <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
-        <tbody>
-          <tr v-if="isLoading">
-            <td colspan="7" class="text-center py-16 text-slate-400 text-xs font-semibold">Loading records…</td>
-          </tr>
-
-          <tr v-else-if="visibleActivities.length === 0">
-            <td colspan="7" class="text-center py-16 text-slate-400">
-              <div class="text-3xl mb-2">📋</div>
-              <p class="font-bold text-slate-600">No actions recorded</p>
-              <p class="text-xs text-slate-400 mt-1">Try another day, shift or filter.</p>
-            </td>
-          </tr>
-
-          <template v-else>
-          <tr
-            v-for="(activity, index) in visibleActivities"
-            :key="activity.id"
-            class="hover:bg-slate-50 text-xs text-slate-800 transition-colors"
-          >
-            <td class="px-2 py-2.5 text-center font-mono font-bold border-b border-r border-slate-200 text-slate-500 bg-slate-50 select-none">
-              {{ index + 1 }}
-            </td>
-
-            <td class="px-3 py-2.5 border-b border-r border-slate-200 font-mono">
-              <div class="text-xs font-bold text-slate-900" title="Tashkent time">{{ formatTashkentTime(activity.action_at) }}</div>
-              <div class="text-[10px] text-slate-400" title="US Eastern time">{{ formatEasternDateTime(activity.action_at) }} ET</div>
-            </td>
-
-            <td class="px-3 py-2.5 border-b border-r border-slate-200">
-              <span :class="['px-2 py-0.5 rounded border text-[10px] font-bold uppercase', getShiftConfig(activity.shift_code).color]">
-                {{ getShiftConfig(activity.shift_code).icon }} {{ getShiftConfig(activity.shift_code).label }}
-              </span>
-            </td>
-
-            <td class="px-3 py-2.5 border-b border-r border-slate-200 font-bold text-slate-900 truncate" :title="activity.staff_name_snapshot">
-              👤 {{ activity.staff_name_snapshot || 'Unknown' }}
-            </td>
-
-            <td class="px-3 py-2.5 border-b border-r border-slate-200 truncate">
-              <div class="flex items-center gap-1.5 truncate">
-                <span class="truncate font-semibold text-slate-900" :title="activity.driver_name_snapshot">
-                  {{ activity.driver_name_snapshot || '—' }}
-                </span>
-                <span
-                  v-if="isDriverDeleted(activity)"
-                  class="px-1.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shrink-0"
-                  title="This driver was removed from the fleet; the record is kept"
-                >
-                  Deleted
-                </span>
-              </div>
-              <div v-if="activity.company_name_snapshot" class="text-[10px] text-slate-400 font-medium truncate">
-                {{ activity.company_name_snapshot }}
-              </div>
-            </td>
-
-            <td class="px-3 py-2.5 border-b border-r border-slate-200 text-center">
-              <span :class="['px-2 py-1 rounded text-[11px] font-bold uppercase border inline-block truncate max-w-full', getActionTypeConfig(activity.action_type).color]">
-                {{ getActionTypeConfig(activity.action_type).icon }} {{ getActionTypeConfig(activity.action_type).label }}
-              </span>
-            </td>
-
-            <td class="px-4 py-2.5 border-b border-slate-200 text-slate-700 truncate" :title="activity.extra_note || ''">
-              {{ activity.extra_note || '—' }}
-            </td>
-          </tr>
-          </template>
-        </tbody>
-      </table>
+    <!-- Records -->
+    <div class="cb-panel">
+      <div class="cb-grid-head grid head">
+        <div class="center">#</div><div>Time · TAS / ET</div><div>Shift</div><div>Staff</div><div>Driver</div><div>Action</div><div>Note</div>
+      </div>
+      <div v-if="isLoading" class="empty">Loading records…</div>
+      <template v-else>
+        <div v-for="(r, i) in rows" :key="r.id" class="cb-grid-row grid">
+          <div class="center idx">{{ rows.length - i }}</div>
+          <div class="cb-ellipsis">
+            <span class="tas">{{ formatTashkentClock(r.action_at) }}</span>
+            <span class="cb-muted"> / {{ formatEasternClock(r.action_at) }}</span>
+          </div>
+          <div class="cb-muted">{{ getShiftConfig(r.shift_code).label }}</div>
+          <div class="person">
+            <span class="cb-avatar avatar">{{ initials(r.staff_name_snapshot) }}</span>
+            <span class="cb-ellipsis">{{ r.staff_name_snapshot || 'Unknown' }}</span>
+          </div>
+          <div class="person">
+            <span class="cb-ellipsis strong" :title="r.company_name_snapshot">{{ r.driver_name_snapshot || '—' }}</span>
+            <span v-if="isDriverDeleted(r)" class="tag tag-neutral">Deleted</span>
+          </div>
+          <div><span class="action-tag" :style="getActionTypeConfig(r.action_type).tag">{{ getActionTypeConfig(r.action_type).label }}</span></div>
+          <div class="cb-muted cb-ellipsis" :title="r.extra_note || ''">{{ r.extra_note || '—' }}</div>
+        </div>
+        <div v-if="rows.length === 0" class="empty">No actions for this selection.</div>
+      </template>
     </div>
   </div>
 </template>
@@ -262,34 +96,25 @@ import { isCurrentUserManager, staffProfiles as roster } from '../services/authS
 import {
   SHIFTS,
   getShiftConfig,
-  shiftHours,
   currentWorkDay,
   addDays,
-  formatWorkDay,
-  formatTashkentTime,
-  formatEasternDateTime
+  formatWorkDayShort,
+  formatTashkentClock,
+  formatEasternClock
 } from '../config/shifts';
+import { initials } from '../utils/format';
 
 const props = defineProps({
-  activeDrivers: {
-    type: Array,
-    default: () => []
-  },
+  activeDrivers: { type: Array, default: () => [] },
   // Bumped by the app after this user records an action
-  refreshKey: {
-    type: Number,
-    default: 0
-  }
+  refreshKey: { type: Number, default: 0 }
 });
 
 const isManager = computed(() => isCurrentUserManager());
 const staffProfiles = computed(() => roster.value);
 const today = currentWorkDay();
 
-const shiftOptions = [
-  { code: '', label: 'All', icon: '🕒' },
-  ...SHIFTS.map(s => ({ code: s.code, label: s.label, icon: s.icon }))
-];
+const shiftOptions = [{ code: '', label: 'All' }, ...SHIFTS.map(s => ({ code: s.code, label: s.label }))];
 
 const filters = reactive({
   day: today,
@@ -304,8 +129,7 @@ const isLoading = ref(false);
 const errorMessage = ref('');
 let loadSeq = 0;
 
-const selectedShift = computed(() => getShiftConfig(filters.shift));
-const selectedShiftHours = computed(() => shiftHours(filters.shift, filters.day));
+const dayLabel = computed(() => (filters.day === today ? `Today · ${formatWorkDayShort(today)}` : formatWorkDayShort(filters.day)));
 
 async function load() {
   if (!filters.day) return;
@@ -317,8 +141,7 @@ async function load() {
       fromDate: filters.day,
       toDate: filters.day,
       shiftCode: isManager.value ? filters.shift : '',
-      staffUserId: isManager.value ? filters.staffUserId : '',
-      actionType: filters.actionType
+      staffUserId: isManager.value ? filters.staffUserId : ''
     });
     if (seq === loadSeq) activities.value = rows;
   } catch (err) {
@@ -336,21 +159,23 @@ function shiftDay(n) {
   if (next <= today) filters.day = next;
 }
 
-// Driver / company search runs on the loaded day
-const visibleActivities = computed(() => {
+// Search applies before the action tiles, so the tiles count what matches
+const matching = computed(() => {
   const q = filters.search.trim().toLowerCase();
   if (!q) return activities.value;
   return activities.value.filter(a =>
-    (a.driver_name_snapshot || '').toLowerCase().includes(q) ||
-    (a.company_name_snapshot || '').toLowerCase().includes(q)
+    `${a.driver_name_snapshot || ''} ${a.company_name_snapshot || ''}`.toLowerCase().includes(q)
   );
 });
 
-const actionCounts = computed(() => {
-  const counts = {};
-  visibleActivities.value.forEach(a => { counts[a.action_type] = (counts[a.action_type] || 0) + 1; });
-  return counts;
-});
+const countTiles = computed(() => [
+  { code: '', label: 'All actions', count: matching.value.length },
+  ...ACTION_TYPES.map(a => ({ code: a.code, label: a.label, count: matching.value.filter(r => r.action_type === a.code).length }))
+]);
+
+const rows = computed(() => (filters.actionType
+  ? matching.value.filter(r => r.action_type === filters.actionType)
+  : matching.value));
 
 function isDriverDeleted(activity) {
   if (!activity.driver_name_snapshot) return false;
@@ -358,6 +183,48 @@ function isDriverDeleted(activity) {
   return !props.activeDrivers.some(d => d.id === activity.driver_id);
 }
 
-watch(() => [filters.day, filters.shift, filters.staffUserId, filters.actionType, props.refreshKey], load);
+watch(() => [filters.day, filters.shift, filters.staffUserId, props.refreshKey], load);
 onMounted(load);
 </script>
+
+<style scoped>
+.logs { user-select: text; }
+.title-block { display: flex; flex-direction: column; gap: 1px; }
+.stepper { display: flex; align-items: center; border: 1px solid var(--color-divider); background: var(--color-neutral-100); }
+.step { width: 34px; height: 34px; color: var(--color-text); }
+.day { position: relative; font-family: var(--font-heading); font-size: 16px; padding: 0 12px; min-width: 150px; text-align: center; cursor: pointer; }
+/* The native date picker sits invisibly over the label: click the day to pick another */
+.day-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.day-input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.compact { min-height: 34px; font-size: 13px; background-color: var(--color-neutral-100); }
+.staff-select { width: 170px; }
+.search { width: 190px; }
+
+.counts { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.count {
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: 14px 16px;
+  border: 0; border-left: 1px solid var(--color-divider); cursor: pointer; font: inherit; text-align: left;
+  color: var(--color-text); background: transparent;
+}
+.count:first-child { border-left: 0; }
+.count:hover:not(.is-on) { background: var(--color-bg); }
+.count.is-on { background: var(--color-accent-100); box-shadow: inset 0 -2px 0 var(--color-accent); }
+.count-num { font-size: 30px; line-height: 1; }
+
+.grid { grid-template-columns: 48px 150px 100px minmax(0, 1.1fr) minmax(0, 1.3fr) 130px minmax(0, 1.4fr); }
+.head { position: sticky; top: -18px; background: var(--color-neutral-100); z-index: 2; }
+.center { text-align: center; }
+.idx { font-family: var(--font-heading); color: var(--color-neutral-600); }
+.tas { font-family: var(--font-heading); font-weight: 600; font-size: 15px; }
+.person { display: flex; align-items: center; gap: 8px; }
+.avatar { width: 24px; height: 24px; font-size: 10px; }
+.strong { font-weight: 500; }
+.action-tag { display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 8px; white-space: nowrap; }
+.empty { padding: 40px; text-align: center; font-size: 14px; color: var(--color-neutral-700); }
+
+@media (max-width: 1240px) {
+  .counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .count:nth-child(4) { border-left: 0; }
+  .count:nth-child(n + 4) { border-top: 1px solid var(--color-divider); }
+}
+</style>
