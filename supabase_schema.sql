@@ -374,6 +374,27 @@ CREATE TRIGGER activities_stamp_actor
     BEFORE INSERT ON public.activities
     FOR EACH ROW EXECUTE FUNCTION public.activities_stamp_actor();
 
+-- Only managers rename a company or change its note; staff may still reorder companies
+CREATE OR REPLACE FUNCTION public.companies_guard_details()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF auth.uid() IS NOT NULL
+       AND (NEW.name IS DISTINCT FROM OLD.name OR NEW.note IS DISTINCT FROM OLD.note)
+       AND NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can edit company details' USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS companies_guard_details ON public.companies;
+CREATE TRIGGER companies_guard_details
+    BEFORE UPDATE ON public.companies
+    FOR EACH ROW EXECUTE FUNCTION public.companies_guard_details();
+
 -- Records from before shifts existed: place them by the clock
 UPDATE public.activities a
 SET (shift_code, shift_date) = (SELECT s.shift_code, s.shift_date FROM public.cb_shift_of(a.action_at) s)
@@ -734,6 +755,214 @@ BEGIN
             EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
         END IF;
     END LOOP;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 7B. NOTIFICATIONS (manager -> staff) AND EXTENSIONS (manager publishes, team downloads)
+-- ------------------------------------------------------------------------------
+-- The signed-in member's current shift (for shift-wide notifications)
+CREATE OR REPLACE FUNCTION public.current_shift_code()
+RETURNS TEXT
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT shift_code FROM public.staff_profiles
+    WHERE id = auth.uid()::text AND is_active
+    LIMIT 1
+$$;
+
+-- audience: ALL = whole team, SHIFT = everyone on audience_shift, STAFF = one person
+CREATE TABLE IF NOT EXISTS public.notifications (
+    id TEXT PRIMARY KEY DEFAULT ('ntf-' || replace(gen_random_uuid()::text, '-', '')),
+    team_id TEXT NOT NULL DEFAULT public.current_team_id(),
+    sender_id TEXT REFERENCES public.staff_profiles(id) ON DELETE SET NULL,
+    sender_name TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    body TEXT NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT 'ALL' CHECK (audience IN ('ALL', 'SHIFT', 'STAFF')),
+    audience_shift TEXT CHECK (audience_shift IN ('MORNING', 'AFTERNOON', 'NIGHT')),
+    audience_staff_id TEXT REFERENCES public.staff_profiles(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (audience <> 'SHIFT' OR audience_shift IS NOT NULL),
+    CHECK (audience <> 'STAFF' OR audience_staff_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS notifications_team_idx ON public.notifications (team_id, created_at DESC);
+
+-- One row per person per notification they have seen
+CREATE TABLE IF NOT EXISTS public.notification_reads (
+    notification_id TEXT NOT NULL REFERENCES public.notifications(id) ON DELETE CASCADE,
+    staff_id TEXT NOT NULL REFERENCES public.staff_profiles(id) ON DELETE CASCADE,
+    read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (notification_id, staff_id)
+);
+
+-- Extension builds a manager publishes for the team (file in the 'extensions' storage bucket)
+CREATE TABLE IF NOT EXISTS public.extensions (
+    id TEXT PRIMARY KEY DEFAULT ('ext-' || replace(gen_random_uuid()::text, '-', '')),
+    team_id TEXT NOT NULL DEFAULT public.current_team_id(),
+    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+    version TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    setup_steps TEXT NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_size BIGINT,
+    published_by TEXT REFERENCES public.staff_profiles(id) ON DELETE SET NULL,
+    publisher_name TEXT NOT NULL DEFAULT '',
+    published_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS extensions_team_idx ON public.extensions (team_id, published_at DESC);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notification_reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.extensions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Members read notifications meant for them" ON public.notifications;
+DROP POLICY IF EXISTS "Managers send notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Managers delete notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Members read their own read marks" ON public.notification_reads;
+DROP POLICY IF EXISTS "Members mark notifications read" ON public.notification_reads;
+DROP POLICY IF EXISTS "Members read team extensions" ON public.extensions;
+DROP POLICY IF EXISTS "Managers publish extensions" ON public.extensions;
+DROP POLICY IF EXISTS "Managers update extensions" ON public.extensions;
+DROP POLICY IF EXISTS "Managers remove extensions" ON public.extensions;
+
+-- Managers see everything they sent; staff see what is addressed to them
+CREATE POLICY "Members read notifications meant for them"
+    ON public.notifications FOR SELECT TO authenticated
+    USING (
+        team_id = public.current_team_id()
+        AND (
+            public.is_team_manager()
+            OR audience = 'ALL'
+            OR (audience = 'STAFF' AND audience_staff_id = auth.uid()::text)
+            OR (audience = 'SHIFT' AND audience_shift = public.current_shift_code())
+        )
+    );
+
+CREATE POLICY "Managers send notifications"
+    ON public.notifications FOR INSERT TO authenticated
+    WITH CHECK (team_id = public.current_team_id() AND public.is_team_manager());
+
+CREATE POLICY "Managers delete notifications"
+    ON public.notifications FOR DELETE TO authenticated
+    USING (team_id = public.current_team_id() AND public.is_team_manager());
+
+CREATE POLICY "Members read their own read marks"
+    ON public.notification_reads FOR SELECT TO authenticated
+    USING (staff_id = auth.uid()::text);
+
+-- Only for notifications the member can see (the subquery runs under their RLS)
+CREATE POLICY "Members mark notifications read"
+    ON public.notification_reads FOR INSERT TO authenticated
+    WITH CHECK (
+        staff_id = auth.uid()::text
+        AND EXISTS (SELECT 1 FROM public.notifications n WHERE n.id = notification_id)
+    );
+
+CREATE POLICY "Members read team extensions"
+    ON public.extensions FOR SELECT TO authenticated
+    USING (team_id = public.current_team_id());
+
+CREATE POLICY "Managers publish extensions"
+    ON public.extensions FOR INSERT TO authenticated
+    WITH CHECK (team_id = public.current_team_id() AND public.is_team_manager());
+
+CREATE POLICY "Managers update extensions"
+    ON public.extensions FOR UPDATE TO authenticated
+    USING (team_id = public.current_team_id() AND public.is_team_manager())
+    WITH CHECK (team_id = public.current_team_id() AND public.is_team_manager());
+
+CREATE POLICY "Managers remove extensions"
+    ON public.extensions FOR DELETE TO authenticated
+    USING (team_id = public.current_team_id() AND public.is_team_manager());
+
+-- Sender / publisher, team and time come from the session, never the client
+CREATE OR REPLACE FUNCTION public.stamp_sender()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    me RECORD;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RETURN NEW;
+    END IF;
+    SELECT id, display_name, team_id INTO me
+    FROM public.staff_profiles WHERE id = auth.uid()::text AND is_active;
+    IF me.id IS NULL THEN
+        RAISE EXCEPTION 'Your account is not active in any team' USING ERRCODE = '42501';
+    END IF;
+    NEW.team_id := me.team_id;
+    IF TG_TABLE_NAME = 'notifications' THEN
+        NEW.sender_id := me.id;
+        NEW.sender_name := me.display_name;
+        NEW.created_at := NOW();
+    ELSE
+        NEW.published_by := me.id;
+        NEW.publisher_name := me.display_name;
+        NEW.published_at := NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS notifications_stamp_sender ON public.notifications;
+CREATE TRIGGER notifications_stamp_sender
+    BEFORE INSERT ON public.notifications
+    FOR EACH ROW EXECUTE FUNCTION public.stamp_sender();
+
+DROP TRIGGER IF EXISTS extensions_stamp_publisher ON public.extensions;
+CREATE TRIGGER extensions_stamp_publisher
+    BEFORE INSERT ON public.extensions
+    FOR EACH ROW EXECUTE FUNCTION public.stamp_sender();
+
+REVOKE ALL ON public.notifications, public.notification_reads, public.extensions FROM anon;
+GRANT SELECT, INSERT, DELETE ON public.notifications TO authenticated;
+GRANT SELECT, INSERT ON public.notification_reads TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.extensions TO authenticated;
+REVOKE ALL ON FUNCTION public.current_shift_code() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.current_shift_code() TO authenticated;
+
+-- Private storage bucket for extension files: <team_id>/<file>, 50 MB each
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('extensions', 'extensions', false, 52428800)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Team downloads its extension files" ON storage.objects;
+DROP POLICY IF EXISTS "Managers upload extension files" ON storage.objects;
+DROP POLICY IF EXISTS "Managers remove extension files" ON storage.objects;
+
+CREATE POLICY "Team downloads its extension files"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (bucket_id = 'extensions' AND (storage.foldername(name))[1] = public.current_team_id());
+
+CREATE POLICY "Managers upload extension files"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'extensions'
+        AND (storage.foldername(name))[1] = public.current_team_id()
+        AND public.is_team_manager()
+    );
+
+CREATE POLICY "Managers remove extension files"
+    ON storage.objects FOR DELETE TO authenticated
+    USING (
+        bucket_id = 'extensions'
+        AND (storage.foldername(name))[1] = public.current_team_id()
+        AND public.is_team_manager()
+    );
+
+-- Notifications arrive live
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'notifications'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    END IF;
 END $$;
 
 -- ------------------------------------------------------------------------------

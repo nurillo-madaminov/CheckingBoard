@@ -1,40 +1,58 @@
 <template>
-  <aside class="side cb-scroll">
-    <!-- Brand -->
+  <aside :class="['side', 'cb-scroll', { 'is-collapsed': collapsed }]">
+    <!-- Brand + open / close -->
     <div class="brand">
       <span class="brand-mark">CB</span>
-      <div class="brand-text">
+      <div v-if="!collapsed" class="brand-text">
         <span class="brand-name">CheckingBoard</span>
         <span class="brand-team">{{ teamName || 'Team' }}</span>
       </div>
+      <button
+        class="collapse-btn"
+        :title="collapsed ? 'Open sidebar' : 'Close sidebar'"
+        :aria-label="collapsed ? 'Open sidebar' : 'Close sidebar'"
+        @click="$emit('update:collapsed', !collapsed)"
+      >
+        <svg v-if="collapsed" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" /></svg>
+        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" /></svg>
+      </button>
     </div>
 
     <!-- Views -->
     <nav class="nav">
-      <button :class="['nav-item', { 'is-on': activeView === 'fleet' }]" @click="$emit('navigate', 'fleet')">
+      <button :class="['nav-item', { 'is-on': activeView === 'fleet' }]" title="Board" @click="$emit('navigate', 'fleet')">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="1" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
         <span class="nav-label">Board</span>
         <span class="nav-count">{{ boardCount }}</span>
       </button>
-      <button :class="['nav-item', { 'is-on': activeView === 'activity_log' }]" @click="$emit('navigate', 'activity_log')">
+      <button :class="['nav-item', { 'is-on': activeView === 'activity_log' }]" title="Logs" @click="$emit('navigate', 'activity_log')">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></svg>
         <span class="nav-label">Logs</span>
         <span class="nav-count">{{ logsToday }}</span>
       </button>
       <template v-if="isManager">
-        <button :class="['nav-item', { 'is-on': activeView === 'shifts' }]" @click="$emit('navigate', 'shifts')">
+        <button :class="['nav-item', { 'is-on': activeView === 'shifts' }]" title="Shifts" @click="$emit('navigate', 'shifts')">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h5" /><path d="M17.5 17.5 16 16.3V14" /><circle cx="16" cy="16" r="6" /></svg>
           <span class="nav-label">Shifts</span>
         </button>
-        <button :class="['nav-item', { 'is-on': activeView === 'statistics' }]" @click="$emit('navigate', 'statistics')">
+        <button :class="['nav-item', { 'is-on': activeView === 'statistics' }]" title="Statistics" @click="$emit('navigate', 'statistics')">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
           <span class="nav-label">Statistics</span>
         </button>
       </template>
+      <button :class="['nav-item', { 'is-on': activeView === 'extensions' }]" title="Extensions" @click="$emit('navigate', 'extensions')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" /></svg>
+        <span class="nav-label">Extensions</span>
+      </button>
+      <button :class="['nav-item', { 'is-on': notificationsOpen }]" title="Notifications" @click="$emit('open-notifications')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /></svg>
+        <span class="nav-label">Notifications</span>
+        <span v-if="unreadCount" class="nav-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+      </button>
     </nav>
 
     <!-- Shift on duty -->
-    <div class="block">
+    <div v-if="!collapsed" class="block">
       <div class="row-between">
         <span class="kicker">On duty</span>
         <span class="dim">{{ duty.left }}</span>
@@ -59,23 +77,23 @@
     </div>
 
     <!-- Clocks -->
-    <div class="block clocks tall-only">
+    <div v-if="!collapsed" class="block clocks tall-only">
       <div class="clock"><span class="kicker">Tashkent</span><span class="clock-time">{{ clocks.tas }}</span></div>
       <div class="clock"><span class="kicker">Eastern</span><span class="clock-time">{{ clocks.et }}</span></div>
     </div>
 
     <div class="cb-spacer"></div>
 
-    <div class="live tall-only">
+    <div class="live tall-only" :title="isLive ? 'Live · synced with your team' : 'Connecting to live updates…'">
       <span :class="['live-dot', { 'is-live': isLive }]"></span>
-      {{ isLive ? 'Live · synced with your team' : 'Connecting to live updates…' }}
+      <template v-if="!collapsed">{{ isLive ? 'Live · synced with your team' : 'Connecting to live updates…' }}</template>
     </div>
 
     <!-- Me -->
     <div class="me">
       <button class="me-btn" title="Team &amp; staff" @click="$emit('open-staff')">
         <span class="cb-avatar me-avatar">{{ myInitials }}</span>
-        <span class="me-text">
+        <span v-if="!collapsed" class="me-text">
           <span class="cb-ellipsis me-name">{{ currentUser?.displayName }}</span>
           <span class="dim small me-role">{{ currentUser?.role }} · Team &amp; staff</span>
         </span>
@@ -100,10 +118,14 @@ const props = defineProps({
   boardCount: { type: Number, default: 0 },
   // Today's action records (staff: their own, manager: the team)
   todayActivities: { type: Array, default: () => [] },
-  roster: { type: Array, default: () => [] }
+  roster: { type: Array, default: () => [] },
+  // Closed = a slim icon rail
+  collapsed: { type: Boolean, default: false },
+  unreadCount: { type: Number, default: 0 },
+  notificationsOpen: { type: Boolean, default: false }
 });
 
-defineEmits(['navigate', 'open-staff', 'logout']);
+defineEmits(['navigate', 'open-staff', 'logout', 'open-notifications', 'update:collapsed']);
 
 const now = ref(new Date());
 let timer = null;
@@ -205,6 +227,29 @@ const dutyStaff = computed(() => {
 }
 .signout:hover { color: var(--color-bg); }
 
+.collapse-btn {
+  margin-left: auto; width: 28px; height: 28px; flex-shrink: 0; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--color-accent-300); cursor: pointer;
+}
+.collapse-btn:hover { background: var(--color-accent-800); color: var(--color-bg); }
+.nav-badge {
+  min-width: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center;
+  background: var(--color-signal); color: var(--color-bg);
+}
+
 @media (max-width: 1240px) { .side { width: 200px; } }
+
+/* Closed: a slim rail of icons; labels show as tooltips */
+.side { transition: width 160ms ease; }
+.side.is-collapsed { width: 60px; }
+.side.is-collapsed .brand { flex-direction: column; gap: 8px; padding: 14px 0 10px; }
+.side.is-collapsed .collapse-btn { margin-left: 0; }
+.side.is-collapsed .nav { padding: 6px; }
+.side.is-collapsed .nav-item { justify-content: center; padding: 10px 0; position: relative; }
+.side.is-collapsed .nav-label, .side.is-collapsed .nav-count { display: none; }
+.side.is-collapsed .nav-badge { position: absolute; top: 3px; right: 3px; min-width: 16px; padding: 0 3px; font-size: 10px; line-height: 16px; }
+.side.is-collapsed .live { justify-content: center; padding: 0 0 10px; }
+.side.is-collapsed .me { flex-direction: column; padding: 10px 0; gap: 6px; }
+.side.is-collapsed .me-btn { flex: none; padding: 4px; }
 @media (max-height: 720px) { .tall-only { display: none; } }
 </style>

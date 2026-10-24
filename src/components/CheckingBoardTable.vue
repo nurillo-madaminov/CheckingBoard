@@ -15,9 +15,13 @@
           class="input search-input"
           placeholder="Search driver, unit, company"
           @input="$emit('update:searchQuery', $event.target.value)"
-          @keydown.esc="$event.target.blur()"
+          @keydown.esc.stop="onSearchEscape"
         />
-        <span class="cb-key search-key">/</span>
+        <!-- ✕ clears the search at once (Esc does the same); "/" hint while empty -->
+        <button v-if="searchQuery" class="search-clear" title="Clear search (Esc)" @click="clearSearch">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        </button>
+        <span v-else class="cb-key search-key">/</span>
       </div>
       <button class="btn btn-secondary" @click="$emit('reset-data')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
@@ -118,7 +122,6 @@
               @update="$emit('update-driver', $event)"
               @delete="$emit('delete-driver', $event)"
               @edit="$emit('edit-driver', $event)"
-              @log-action="$emit('log-action', $event)"
               @drag-start="handleDragStart"
               @drag-end="handleDragEnd"
               @row-dragover="handleRowDragOver"
@@ -153,7 +156,7 @@
           <span class="tab-count">{{ tabCounts[tab.id] || 0 }}</span>
         </button>
         <div class="tabs-fill"></div>
-        <div class="hint">Hover a row for actions · ↑↓ move · C check · E edit · 1–5 log · / search</div>
+        <div class="hint">Hover a row for actions · ↑↓ move · C check · E edit · / search · Esc clear</div>
       </nav>
     </div>
   </div>
@@ -164,7 +167,6 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import CompanyHeaderRow from './CompanyHeaderRow.vue';
 import DriverRow from './DriverRow.vue';
 import { BOTTOM_TABS } from '../config/statusConfig';
-import { ACTION_TYPES } from '../services/activityService';
 import { getFreshnessInfo } from '../utils/freshness';
 import { getShiftConfig, shiftProgress, currentWorkDay, clockTashkent } from '../config/shifts';
 import { driverLabel } from '../utils/format';
@@ -187,7 +189,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'add-driver', 'edit-driver', 'delete-driver', 'update-driver', 'edit-company', 'delete-company',
-  'select-driver', 'reorder-driver', 'reorder-company', 'log-action',
+  'select-driver', 'reorder-driver', 'reorder-company',
   'select-tab', 'reorder-tabs', 'update:searchQuery', 'reset-data', 'add-company'
 ]);
 
@@ -318,12 +320,30 @@ function jumpToOldest() {
   scrollToDriver(oldest.id);
 }
 
+// ---------------- search ----------------
+function clearSearch() {
+  emit('update:searchQuery', '');
+  searchRef.value?.focus();
+}
+
+// Esc in the box: first clears the text, then leaves the box
+function onSearchEscape(e) {
+  if (props.searchQuery) emit('update:searchQuery', '');
+  else e.target.blur();
+}
+
 // ---------------- keyboard ----------------
+// Actions (Shift, Cycle, ...) are logged by the Leader ELD extension, so the board
+// only has navigation shortcuts.
 function handleKey(e) {
   if (!props.keyboardEnabled || e.ctrlKey || e.metaKey || e.altKey) return;
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
+  if (e.key === 'Escape' && props.searchQuery) {
+    emit('update:searchQuery', '');
+    return;
+  }
   if (e.key === '/') {
     e.preventDefault();
     searchRef.value?.focus();
@@ -346,9 +366,6 @@ function handleKey(e) {
     emit('update-driver', { ...driver, lastCheckedAt: new Date().toISOString() });
   } else if (key === 'e') {
     emit('edit-driver', driver);
-  } else {
-    const action = ACTION_TYPES.find(a => a.key === e.key);
-    if (action) emit('log-action', { actionType: action.code, driver });
   }
 }
 
@@ -495,6 +512,11 @@ function tabDropStyle(tabId) {
 .search { position: relative; width: 300px; min-width: 160px; flex-shrink: 1; }
 .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--color-neutral-600); }
 .search-input { padding-left: 32px; padding-right: 36px; min-height: 34px; font-size: 13px; background: var(--color-neutral-100); }
+.search-clear {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px;
+  display: grid; place-items: center; border: 0; background: transparent; cursor: pointer; color: var(--color-neutral-700);
+}
+.search-clear:hover { background: var(--color-neutral-200); color: var(--color-text); }
 .search-key { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: var(--font-body); font-size: 11px; }
 
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }

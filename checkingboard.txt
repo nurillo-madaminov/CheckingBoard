@@ -108,10 +108,12 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
   all companies in a single click.
 - Main Tab vs Category Tabs Action Isolation:
   * In the main "CHECKING BOARD" tab: companies display action buttons (+ Add Driver,
-    ✏️ Edit, 🗑️ Delete). + Add Company, + Add Driver and 🗑️ Delete (company and
-    driver) are shown to MANAGERS ONLY; staff can still edit, reorder, change sign /
-    status / notes and use the ⚡ action buttons. The database enforces this too
-    (INSERT / DELETE policies on companies and drivers require a manager).
+    ✏️ Edit, 🗑️ Delete). + Add Company, all company actions (+ Add Driver, ✏️ Edit
+    company name / note, 🗑️ Delete) and deleting drivers are MANAGERS ONLY; staff can
+    still edit drivers, reorder drivers and companies and change sign / status / notes.
+    The database enforces this too (INSERT / DELETE policies
+    on companies and drivers require a manager, and the companies_guard_details trigger
+    rejects company name / note changes from staff).
   * In all category tabs (AT PU/DEL, READY, etc.): all company action buttons are
     hidden to avoid accidental modifications outside the master view.
 
@@ -414,8 +416,8 @@ E. SIGN OUT:
 16. ACTION-ONLY LOGS, SHIFTS & MANAGER PAGES (supersedes parts of section 14)
 --------------------------------------------------------------------------------
 A. WHAT IS LOGGED:
-- A log record is written ONLY when someone clicks a ⚡ action button on a driver
-  row: SHIFT (Open Shift), CYCLE (Open Cycle), FIX_LOG, BREAK, DRIVER_CONNECTED
+- A log record is written ONLY for a dispatch action, and those are recorded by the
+  Leader ELD logging extension (see 16C), not from the board: SHIFT (Open Shift), CYCLE (Open Cycle), FIX_LOG, BREAK, DRIVER_CONNECTED
   (Connect). Status changes, quick checks (✓), transfers and driver / company
   add / delete are NOT logged. The activities INSERT policy rejects any other
   action_type. Older records of other types stay in the database but are not shown.
@@ -470,14 +472,14 @@ square hairline-bordered objects. The only warm color is the signal
 - Board (CheckingBoardTable.vue): title + search ("/" focuses it), Reset to Ready,
   + Company (managers). KPI cards: active drivers with a status mix bar, checked in
   the last hour, overdue 4h+ (click jumps to the oldest), actions this shift with
-  hourly bars. Rows: drag by #, unit chip, flag, hover actions (check, log menu,
-  flag, edit, delete for managers), sign / status selects in the status look from
+  hourly bars. Rows: drag by #, unit chip, flag, hover actions (check, flag, edit,
+  delete for managers), sign / status selects in the status look from
   statusConfig.js, last-check age with a bar, inline notes. Sheet tabs sit under
   the board (first tab fixed, others draggable). Company rows show a freshness
   strip and the overdue count. Below 720px tall the KPI cards hide; below 1240px
   wide the sidebar and columns narrow.
-- Keyboard on the board: ↑ ↓ select, C mark checked, E edit, 1-5 log Shift / Cycle /
-  Fix Log / Break / Connect, / search, Esc closes menus and dialogs.
+- Keyboard on the board: ↑ ↓ select, C mark checked, E edit, / search, Esc clears the
+  search (and closes menus and dialogs).
 - Freshness levels (utils/freshness.js): fresh < 1h, aging 1-2.5h, warning 2.5-4h,
   overdue 4h+ or never; shown as steel shades, overdue in the signal color.
 - Flag replaces the 6-color row highlight; it is stored in highlight_color.
@@ -491,8 +493,47 @@ square hairline-bordered objects. The only warm color is the signal
   week shown) in three steel shades for Morning / Afternoon / Night.
 
 --------------------------------------------------------------------------------
+16C. NOTIFICATIONS, EXTENSIONS, SEARCH & SIDEBAR
+--------------------------------------------------------------------------------
+- Logging moved to the extension: the board no longer has the ⚡ Log activity button
+  or the 1-5 shortcuts. The Leader ELD extension writes the activities; new rows
+  arrive live (Realtime on activities) and refresh the Logs page, KPI cards and the
+  sidebar counts.
+- Notifications (NotificationsPanel.vue, services/notificationService.js): the 🔔
+  Notifications item in the sidebar opens a drawer with an unread badge. Managers
+  send a title + message to Everyone, one shift, or one person, and can unsend.
+  Staff see only notifications for the whole team, their current shift, or them;
+  opening the drawer marks them read. New ones arrive live with a toast.
+  Tables: notifications (stamped sender / team / time by trigger stamp_sender) and
+  notification_reads (one row per person per notification). RLS: managers insert /
+  delete and read their team; staff read what is addressed to them.
+- Extensions (ExtensionsView.vue, services/extensionService.js): sidebar item for
+  everyone. Managers publish an extension file (.zip / .crx, up to 50 MB) with name,
+  version, description and setup steps (one per line; defaults to the Chrome
+  "Load unpacked" steps). Everyone sees the latest build of each extension with a
+  Download button and the numbered steps; earlier versions are listed under it.
+  Files are in the private Supabase Storage bucket "extensions" under <team_id>/,
+  downloaded through one-minute signed links. Table: extensions (publisher stamped
+  by trigger). RLS + storage policies: team reads, managers upload / delete.
+- Search: a ✕ button clears the board search at once; Esc clears it too (in the box
+  or anywhere on the board), a second Esc leaves the box.
+- Sidebar: the « button closes it to a 60px icon rail (labels become tooltips, the
+  unread badge stays on the bell); » opens it again. Remembered per browser
+  (localStorage "checkingboard_sidebar_collapsed").
+- Database setup: re-run supabase_schema.sql (section 7B adds the tables, policies,
+  storage bucket and Realtime). Tests 17-18 cover notifications and extensions.
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - NOTIFICATIONS & EXTENSIONS:
+- Managers send notifications to everyone / a shift / one person; staff get an
+  unread badge, a drawer and live toasts.
+- Extensions page: managers publish extension builds with setup steps; the team
+  downloads them on any computer.
+- Removed the ⚡ row button and 1-5 keys: the Leader ELD extension logs actions.
+- Search clear button + Esc; collapsible sidebar; staff can no longer edit companies.
+
 OCTOBER 2026 - V2 REDESIGN:
 - Restyled the whole app to the CheckingBoard-v2 design (section 16B): sidebar
   shell, KPI cards, keyboard shortcuts, flag rows, in-app confirmations, new login.

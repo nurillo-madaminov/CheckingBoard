@@ -182,7 +182,7 @@ export function broadcastFleetReset() {
  * Live sync between dispatchers of the same team. postgres_changes events are
  * already limited by RLS; the team check below is an extra guard.
  */
-export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChange, onFleetReset, onStatus }) {
+export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChange, onFleetReset, onStatus, onActivityInsert, onNotificationChange }) {
   if (!supabase || !teamId) return null;
   unsubscribeFromRealtime();
 
@@ -198,6 +198,13 @@ export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChang
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, payload => {
       if (onDriverChange && isOwnTeam(payload)) onDriverChange(payload);
+    })
+    // Actions logged by the extension (or a teammate) and new notifications
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activities' }, payload => {
+      if (onActivityInsert && isOwnTeam(payload)) onActivityInsert(payload);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, payload => {
+      if (onNotificationChange && isOwnTeam(payload)) onNotificationChange(payload);
     })
     .on('broadcast', { event: 'fleet_reset' }, payload => {
       if (onFleetReset) onFleetReset(payload);

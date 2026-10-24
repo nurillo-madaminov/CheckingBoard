@@ -38,14 +38,15 @@
       <span v-if="overdueCount" class="overdue">{{ overdueCount }} overdue</span>
     </div>
     <div class="cell actions-cell">
-      <div v-if="showActions && hover" class="actions" @click.stop>
-        <button v-if="canManageFleet" class="btn btn-ghost add" @click="$emit('add-driver', company)">
+      <!-- Company actions are manager-only: add driver, edit, delete -->
+      <div v-if="showActions && canManageFleet && hover" class="actions" @click.stop>
+        <button class="btn btn-ghost add" @click="$emit('add-driver', company)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>Driver
         </button>
         <button class="btn btn-ghost btn-icon muted" title="Edit company" @click="$emit('edit-company', company)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /><path d="m15 5 4 4" /></svg>
         </button>
-        <button v-if="canManageFleet" class="btn btn-ghost btn-icon muted" title="Delete company" @click="$emit('delete-company', company.id)">
+        <button class="btn btn-ghost btn-icon muted" title="Delete company" @click="$emit('delete-company', company.id)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
         </button>
       </div>
@@ -64,7 +65,7 @@ const props = defineProps({
   drivers: { type: Array, default: () => [] },
   isCollapsed: { type: Boolean, default: true },
   showActions: { type: Boolean, default: true },
-  // Adding drivers and deleting companies is manager-only
+  // Adding drivers and editing or deleting companies is manager-only
   canManageFleet: { type: Boolean, default: false },
   isDragging: { type: Boolean, default: false },
   dropPosition: { type: String, default: '' }

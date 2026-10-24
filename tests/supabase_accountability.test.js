@@ -210,7 +210,7 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.ok(acts.data.some(a => a.staff_user_id === staffA1Id), 'new manager sees team activity');
   });
 
-  test('14. Only managers add or remove companies and drivers; staff edit and reorder', async () => {
+  test('14. Only managers add, rename or remove companies and add or remove drivers; staff edit drivers and reorder', async () => {
     const john = await mustSignIn(uname('john'), pw);
     const comp2 = `comp-t2-${run}`;
     const drv2 = `drv-t2-${run}`;
@@ -231,6 +231,10 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(r.error, null, r.error?.message);
     r = await john.rpc('save_company_order', { p_rows: [{ id: comp2, order_index: 5 }] });
     assert.equal(r.error, null, r.error?.message);
+    const rename = await john.from('companies').update({ name: 'Renamed by staff' }).eq('id', comp2).select();
+    assert.ok(rename.error, 'staff cannot rename a company');
+    r = await mgrA.from('companies').update({ name: 'Second Carrier LLC' }).eq('id', comp2).select();
+    assert.equal(r.data?.length, 1, 'manager renames a company');
     const moved = await mgrA.from('drivers').select('order_index').eq('id', drv2).single();
     assert.equal(moved.data.order_index, 7);
 
@@ -286,5 +290,54 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(r.error, null, r.error?.message);
     const after = await mgrA.from('staff_profiles').select('shift_code').eq('id', staffA1Id).single();
     assert.equal(after.data.shift_code, null);
+  });
+
+  test('17. Notifications: managers send; staff see only what is addressed to them', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id] } });
+    assert.equal(r.error, null, r.error?.message);
+
+    const denied = await john.from('notifications').insert({ title: 'Staff cannot send' });
+    assert.ok(denied.error, 'staff cannot send notifications');
+
+    const send = async (row) => {
+      const res = await mgrA.from('notifications').insert({ sender_name: 'Forged', ...row }).select().single();
+      assert.equal(res.error, null, res.error?.message);
+      return res.data;
+    };
+    const all = await send({ title: `all-${run}`, audience: 'ALL' });
+    const morning = await send({ title: `morning-${run}`, audience: 'SHIFT', audience_shift: 'MORNING' });
+    const night = await send({ title: `night-${run}`, audience: 'SHIFT', audience_shift: 'NIGHT' });
+    const personal = await send({ title: `john-${run}`, audience: 'STAFF', audience_staff_id: staffA1Id });
+    assert.equal(all.sender_name, 'Mona Manager', 'sender comes from the session');
+
+    const { data: seen } = await john.from('notifications').select('id');
+    const ids = new Set(seen.map(n => n.id));
+    assert.ok(ids.has(all.id) && ids.has(morning.id) && ids.has(personal.id), 'team, own shift and personal');
+    assert.ok(!ids.has(night.id), 'another shift is hidden');
+
+    r = await john.from('notification_reads').upsert([{ notification_id: all.id, staff_id: staffA1Id }], { ignoreDuplicates: true });
+    assert.equal(r.error, null, r.error?.message);
+    r = await john.from('notification_reads').insert({ notification_id: night.id, staff_id: staffA1Id });
+    assert.ok(r.error, 'cannot mark a hidden notification read');
+
+    const other = await mgrB.from('notifications').select('id');
+    assert.equal(other.data.length, 0, 'other teams see nothing');
+  });
+
+  test('18. Extensions: managers publish, the team reads, other teams see nothing', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const row = { name: 'Leader ELD Logger', version: '1.0.0', file_path: 'x/test.zip', file_name: 'test.zip', file_size: 1 };
+    const denied = await john.from('extensions').insert(row);
+    assert.ok(denied.error, 'staff cannot publish');
+    const { data, error } = await mgrA.from('extensions').insert(row).select().single();
+    assert.equal(error, null, error?.message);
+    assert.equal(data.publisher_name, 'Mona Manager');
+    const seen = await john.from('extensions').select('id').eq('id', data.id);
+    assert.equal(seen.data.length, 1, 'team members can read');
+    const other = await mgrB.from('extensions').select('id').eq('id', data.id);
+    assert.equal(other.data.length, 0, 'other teams cannot read');
+    const del = await john.from('extensions').delete().eq('id', data.id).select();
+    assert.equal(del.data?.length || 0, 0, 'staff cannot remove');
   });
 });

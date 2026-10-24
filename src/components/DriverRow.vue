@@ -1,8 +1,7 @@
 <template>
   <div
-    ref="rowRef"
     :data-driver-id="driver.id"
-    :class="['row', { 'is-selected': isActive, 'is-flagged': flagged, 'is-overdue': fresh.level === 'overdue', 'is-dragging': isDragging, 'menu-open': showActionMenu }]"
+    :class="['row', { 'is-selected': isActive, 'is-flagged': flagged, 'is-overdue': fresh.level === 'overdue', 'is-dragging': isDragging }]"
     :style="rowStyle"
     @click="$emit('select-row', driver.id)"
     @mouseenter="hover = true"
@@ -29,12 +28,10 @@
       <svg v-if="flagged" class="flag" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></svg>
       <span class="cb-spacer"></span>
 
-      <div v-if="hover || showActionMenu" class="row-actions" @click.stop>
+      <!-- Actions are logged by the Leader ELD extension, not from the board -->
+      <div v-if="hover" class="row-actions" @click.stop>
         <button class="btn btn-ghost btn-icon" title="Mark checked (C)" @click="markAsChecked">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-        </button>
-        <button class="btn btn-ghost btn-icon" title="Log activity (1–5)" @click="toggleActionMenu">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" /></svg>
         </button>
         <button class="btn btn-ghost btn-icon" :title="flagged ? 'Remove flag' : 'Flag row'" @click="toggleFlag">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></svg>
@@ -44,14 +41,6 @@
         </button>
         <button v-if="canDelete" class="btn btn-ghost btn-icon btn-danger" title="Delete driver" @click="$emit('delete', driver.id)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
-        </button>
-      </div>
-
-      <!-- Log activity menu -->
-      <div v-if="showActionMenu" class="menu" @click.stop>
-        <div class="menu-head">Log activity</div>
-        <button v-for="act in ACTION_TYPES" :key="act.code" class="menu-item" @click="triggerAction(act.code)">
-          <span>{{ act.label }}</span><span class="cb-key">{{ act.key }}</span>
         </button>
       </div>
     </div>
@@ -103,9 +92,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { DRIVER_STATUSES, SIGN_STATUSES, getStatusConfig, FLAG_COLOR, isFlagged } from '../config/statusConfig';
-import { ACTION_TYPES } from '../services/activityService';
 import { getFreshnessInfo, freshnessColor } from '../utils/freshness';
 
 const props = defineProps({
@@ -118,12 +106,10 @@ const props = defineProps({
   canDelete: { type: Boolean, default: false }
 });
 
-const emit = defineEmits(['update', 'delete', 'edit', 'select-row', 'drag-start', 'drag-end', 'row-dragover', 'row-drop', 'log-action']);
+const emit = defineEmits(['update', 'delete', 'edit', 'select-row', 'drag-start', 'drag-end', 'row-dragover', 'row-drop']);
 
-const rowRef = ref(null);
 const hover = ref(false);
 const localNotes = ref(props.driver.notes || '');
-const showActionMenu = ref(false);
 
 watch(() => props.driver.notes, (val) => {
   localNotes.value = val || '';
@@ -169,41 +155,11 @@ function saveNotes() {
   }
 }
 
-function toggleActionMenu() {
-  onSelectLine();
-  showActionMenu.value = !showActionMenu.value;
-}
-
-function triggerAction(actionType) {
-  showActionMenu.value = false;
-  onSelectLine();
-  emit('log-action', { actionType, driver: props.driver });
-}
-
 function onDragStart(e) {
   emit('drag-start', props.driver.id);
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', `driver:${props.driver.id}`);
 }
-
-// Close the menu on an outside click or Esc
-function handleDocumentClick(e) {
-  if (showActionMenu.value && rowRef.value && !rowRef.value.contains(e.target)) {
-    showActionMenu.value = false;
-  }
-}
-function handleKeydown(e) {
-  if (e.key === 'Escape') showActionMenu.value = false;
-}
-
-onMounted(() => {
-  document.addEventListener('click', handleDocumentClick);
-  window.addEventListener('keydown', handleKeydown);
-});
-onUnmounted(() => {
-  document.removeEventListener('click', handleDocumentClick);
-  window.removeEventListener('keydown', handleKeydown);
-});
 </script>
 
 <style scoped>
@@ -216,7 +172,6 @@ onUnmounted(() => {
 .row.is-flagged { background: color-mix(in srgb, var(--color-accent) 9%, transparent); }
 .row.is-selected { background: var(--color-accent-100); box-shadow: inset 0 0 0 1px var(--color-accent); }
 .row.is-dragging { opacity: 0.35; }
-.row.menu-open { z-index: 20; }
 
 .num {
   height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px;
@@ -239,16 +194,6 @@ onUnmounted(() => {
 .row-actions { display: flex; gap: 1px; flex-shrink: 0; }
 .row-actions .btn-icon { width: 26px; height: 26px; }
 
-.menu {
-  position: absolute; right: 8px; top: 38px; z-index: 30; width: 210px; padding: 6px 0;
-  background: var(--color-neutral-100); border: 1px solid var(--color-divider); box-shadow: var(--shadow-lg);
-}
-.menu-head { padding: 4px 12px 6px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-600); }
-.menu-item {
-  display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 7px 12px;
-  border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--color-text); cursor: pointer; text-align: left;
-}
-.menu-item:hover { background: var(--color-accent-100); }
 
 .cell { padding: 0 10px; min-width: 0; }
 .pick {

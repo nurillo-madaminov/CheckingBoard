@@ -18,6 +18,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <!-- SIGNED IN: SIDEBAR + CURRENT VIEW -->
   <div v-else class="shell">
     <SideNav
+      v-model:collapsed="sidebarCollapsed"
       :activeView="activeView"
       :currentUser="currentUser"
       :teamName="currentTeam?.name || ''"
@@ -25,9 +26,25 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :boardCount="tabCounts.CHECKING_BOARD"
       :todayActivities="todayActivities"
       :roster="staffProfiles"
+      :unreadCount="unreadCount"
+      :notificationsOpen="showNotifications"
       @navigate="activeView = $event"
+      @open-notifications="showNotifications = !showNotifications"
       @open-staff="showStaffModal = true"
       @logout="handleLogout"
+    />
+
+    <!-- Notifications drawer (slides out beside the sidebar) -->
+    <NotificationsPanel
+      v-if="showNotifications"
+      :notifications="notifications"
+      :unreadIds="unreadIdsAtOpen"
+      :isManager="isManager"
+      :roster="staffProfiles"
+      :sidebarCollapsed="sidebarCollapsed"
+      @close="showNotifications = false"
+      @changed="loadNotifications"
+      @sent="showToast({ title: 'Notification sent', message: $event })"
     />
 
     <main class="main">
@@ -56,7 +73,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         @update-driver="updateDriver"
         @edit-company="openEditCompanyModal"
         @delete-company="deleteCompany"
-        @log-action="handleDriverAction"
         @reset-data="handleResetData"
       />
 
@@ -78,6 +94,14 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       <DailyStatisticsView
         v-else-if="activeView === 'statistics' && isManager"
         :refreshKey="activityVersion"
+      />
+
+      <!-- 5. EXTENSIONS (everyone downloads, managers publish) -->
+      <ExtensionsView
+        v-else-if="activeView === 'extensions'"
+        :isManager="isManager"
+        :teamId="currentUser?.teamId || ''"
+        @published="showToast({ title: 'Extension published', message: $event })"
       />
     </main>
 
@@ -155,6 +179,8 @@ import StaffSwitchModal from './components/StaffSwitchModal.vue';
 import ActivityLogView from './components/ActivityLogView.vue';
 import ShiftControlView from './components/ShiftControlView.vue';
 import DailyStatisticsView from './components/DailyStatisticsView.vue';
+import ExtensionsView from './components/ExtensionsView.vue';
+import NotificationsPanel from './components/NotificationsPanel.vue';
 import LoginView from './components/LoginView.vue';
 
 import { BOTTOM_TABS, getStatusConfig, getStatusTab } from './config/statusConfig';
@@ -167,7 +193,8 @@ import {
   initAuth,
   logoutUser
 } from './services/authService';
-import { recordActivity, fetchActivities, getActionTypeConfig } from './services/activityService';
+import { fetchActivities } from './services/activityService';
+import { fetchNotifications, fetchReadIds, markRead } from './services/notificationService';
 import * as db from './services/supabaseService';
 import { driverLabel as driverLabelOf } from './utils/format';
 
@@ -180,13 +207,31 @@ const isManager = computed(() => currentUser.value?.role === 'manager');
 const authLoading = ref(isSupabaseConfigured);
 const companies = ref([]);
 const drivers = ref([]);
-const activityVersion = ref(0); // bumped after recording an action so open log views reload
+const activityVersion = ref(0); // bumped when new actions arrive so open log views reload
 const activeTabId = ref('CHECKING_BOARD');
 const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'statistics'
 const searchQuery = ref('');
 const selectedDriverId = ref('');
 const showStaffModal = ref(false);
 const isLive = ref(false);
+
+// Sidebar open / closed is a per-browser view preference
+const SIDEBAR_KEY = 'checkingboard_sidebar_collapsed';
+function loadSidebarCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch (e) {
+    return false;
+  }
+}
+const sidebarCollapsed = ref(loadSidebarCollapsed());
+watch(sidebarCollapsed, (value) => {
+  try {
+    localStorage.setItem(SIDEBAR_KEY, value ? '1' : '0');
+  } catch (e) {
+    // Preference not saved; it still applies for this session
+  }
+});
 // Today's action records (staff: their own, manager: the team) for the sidebar and KPI cards
 const todayActivities = ref([]);
 let signResetTimer = null;
@@ -265,6 +310,8 @@ function setupRealtime() {
         applyDriverRow(payload.new);
       }
     },
+    onActivityInsert: onActivityLogged,
+    onNotificationChange,
     onFleetReset: async () => {
       drivers.value = sortDrivers(await db.fetchDrivers());
       showToast({
@@ -302,6 +349,7 @@ async function enterTeam() {
   await loadFleet();
   setupRealtime();
   loadTodayActivities();
+  loadNotifications();
   await runSignReset();
   if (signResetTimer) clearInterval(signResetTimer);
   // Midnight rollover without reloading: the database decides if a reset is due
@@ -321,6 +369,9 @@ function leaveTeam() {
   companies.value = [];
   drivers.value = [];
   todayActivities.value = [];
+  notifications.value = [];
+  readIds.value = new Set();
+  showNotifications.value = false;
   confirmState.value = null;
   activeView.value = 'fleet';
   showStaffModal.value = false;
@@ -505,42 +556,60 @@ function handleReorderTabs({ draggedId, targetId, position }) {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch Quick Action handler (Shift, Cycle, Fix Log, Break, Connect)
-// These buttons are the ONLY thing that writes the action log.
+// Notifications (managers send, staff receive)
 // ---------------------------------------------------------------------------
-async function handleDriverAction({ actionType, driver, extraNote = '' }) {
-  const comp = companies.value.find(c => c.id === driver.companyId);
-  const actionConfig = getActionTypeConfig(actionType);
-  const driverLabel = driverLabelOf(driver);
+const notifications = ref([]);
+const readIds = ref(new Set());
+const showNotifications = ref(false);
+// Unread when the drawer was opened, so they stay marked "New" while it is open
+const unreadIdsAtOpen = ref(new Set());
 
-  // 1. Mark driver as freshly checked
-  const idx = drivers.value.findIndex(d => d.id === driver.id);
-  if (idx !== -1) {
-    const updated = { ...drivers.value[idx], lastCheckedAt: new Date().toISOString() };
-    drivers.value[idx] = updated;
-    persist(db.updateDriver(updated));
-  }
+// Managers see what they sent; only what others sent counts as unread
+const incomingNotifications = computed(() =>
+  notifications.value.filter(n => n.sender_id !== currentUser.value?.id)
+);
+const unreadCount = computed(() => incomingNotifications.value.filter(n => !readIds.value.has(n.id)).length);
 
-  // 2. Log the action (actor, time and shift are stamped by the database from the session)
+async function loadNotifications() {
   try {
-    await recordActivity({
-      driver,
-      company: comp,
-      actionType,
-      extraNote: extraNote || `${actionConfig.label} performed for ${driverLabel}`
-    });
+    const list = await fetchNotifications();
+    notifications.value = list;
+    readIds.value = await fetchReadIds(list.map(n => n.id));
+  } catch (err) {
+    console.warn('Could not load notifications:', err);
+  }
+}
+
+watch(showNotifications, async (open) => {
+  if (!open) return;
+  const unread = incomingNotifications.value.filter(n => !readIds.value.has(n.id)).map(n => n.id);
+  unreadIdsAtOpen.value = new Set(unread);
+  if (!unread.length) return;
+  try {
+    await markRead(unread, currentUser.value.id);
+    readIds.value = new Set([...readIds.value, ...unread]);
+  } catch (err) {
+    console.warn('Could not mark notifications read:', err);
+  }
+});
+
+// Actions arrive from the Leader ELD extension; refresh counts and open log views
+let activityRefreshTimer = null;
+function onActivityLogged() {
+  clearTimeout(activityRefreshTimer);
+  activityRefreshTimer = setTimeout(() => {
     activityVersion.value += 1;
     loadTodayActivities();
-  } catch (err) {
-    showErrorToast('Action not recorded', errorText(err));
-    return;
-  }
+  }, 800);
+}
 
-  // 3. Show alert
-  showToast({
-    title: `${actionConfig.label} logged`,
-    message: `${driverLabel} · by ${currentUser.value?.displayName}`
-  });
+async function onNotificationChange(payload) {
+  await loadNotifications();
+  const n = payload.new;
+  if (payload.eventType === 'INSERT' && n?.id && n.sender_id !== currentUser.value?.id
+      && notifications.value.some(x => x.id === n.id)) {
+    showToast({ title: n.title, message: n.body || `From ${n.sender_name}` });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +622,7 @@ function openAddCompanyModal() {
 }
 
 function openEditCompanyModal(company) {
+  if (!isManager.value) return;
   editingCompany.value = company;
   showCompanyModal.value = true;
 }
@@ -562,8 +632,10 @@ function closeCompanyModal() {
   editingCompany.value = null;
 }
 
+// Adding, renaming and deleting companies is manager-only (also enforced by the database)
 async function saveCompany(companyData) {
   closeCompanyModal();
+  if (!isManager.value) return;
   if (companyData.id) {
     const idx = companies.value.findIndex(c => c.id === companyData.id);
     if (idx === -1) return;
@@ -571,7 +643,6 @@ async function saveCompany(companyData) {
     companies.value[idx] = updated;
     await persist(db.updateCompany(updated), 'Company not saved');
   } else {
-    if (!isManager.value) return;
     const maxOrder = companies.value.reduce((m, c) => Math.max(m, c.order || 0), 0);
     const newComp = {
       id: db.newId('comp'),
