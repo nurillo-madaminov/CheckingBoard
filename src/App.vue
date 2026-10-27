@@ -89,6 +89,8 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         v-else-if="activeView === 'shifts' && isManager"
         :refreshKey="activityVersion"
         @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
+        @office-saved="showToast($event)"
+        @office-error="showErrorToast($event.title, $event.message)"
       />
 
       <!-- 4. STATISTICS (manager) -->

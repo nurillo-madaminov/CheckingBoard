@@ -566,8 +566,71 @@ square hairline-bordered objects. The only warm color is the signal
   storage bucket and Realtime). Tests 17-18 cover notifications and extensions.
 
 --------------------------------------------------------------------------------
+16D. OFFICE LOCATION (SETTING ONLY; CHECK-IN COMES LATER)
+--------------------------------------------------------------------------------
+A manager pins the team's office on a map and sets how far from it a check-in is
+allowed. This is only the setting: there is no check-in / check-out, push
+notification or PWA part yet. A future rpc check_in will read these columns and
+measure the distance with cb_distance_m.
+
+A. DATABASE (supabase_schema.sql section 7C, safe to re-run):
+- New nullable columns on public.teams (one office per team; all null = "not
+  configured"): office_name text, office_lat double precision, office_lng double
+  precision, office_radius_m integer, office_updated_at timestamptz,
+  office_updated_by uuid (auth user, ON DELETE SET NULL).
+- CHECK teams_office_location_check: lat -90..90, lng -180..180, radius 30..1000 m,
+  and lat / lng / radius are either all set or all null.
+- rpc set_office_location(p_name, p_lat, p_lng, p_radius_m): SECURITY DEFINER,
+  active managers only (is_team_manager), validates every input with a clear
+  message (name required, max 80 characters; all three of lat / lng / radius
+  required; ranges as above), updates only the caller's own team, and stamps
+  office_updated_at / office_updated_by from the session, never from the client.
+- rpc clear_office_location(): same manager-only rule; sets every office column
+  back to null.
+- public.cb_distance_m(lat1, lng1, lat2, lng2): IMMUTABLE haversine distance in
+  meters (mean Earth radius 6,371,008.8 m). Nothing calls it yet.
+- teams still has no direct client writes; every member reads their own team row
+  (existing SELECT policy), so staff can read the office (for a later "you are
+  480 m from the office").
+
+B. UI (OfficeLocationCard.vue on the Shifts page, managers only; services/
+   officeService.js; loaded on demand so the map library is not in the main bundle):
+- Leaflet map with OpenStreetMap tiles and the OSM attribution (no API key).
+  Click the map, drag the pin, or press Enter on the focused map (pins at its
+  center; arrow keys pan, + / - zoom). A steel circle shows the radius live.
+- Office name; radius slider + number input (30-1000 m, default 150 m) with a hint
+  that indoor GPS is imprecise, so very small radii turn people away.
+- "Use my current location" (asks the browser only on click; clear messages when
+  denied, unavailable, timed out or not on https). Latitude / longitude inputs stay
+  in sync with the pin.
+- Save (enabled only when something changed and is valid) / Discard; Esc discards
+  after a confirmation if there are changes. "Remove office" asks first
+  (ConfirmDialog). Errors show the red "not saved" toast and reload from the
+  database. Status line: "Last set by <name> on <Tashkent time> Tashkent ·
+  <Eastern time> ET", or an empty state when no office is set.
+- Nothing about the office is stored in the browser.
+
+C. TESTS (tests/supabase_accountability.test.js):
+- 19: a manager sets and clears the office; who / when come from the session.
+- 20: staff are rejected by both functions; no direct writes to teams; another
+  team's manager cannot change or read this team's office.
+- 21: out-of-range lat / lng / radius, a blank name and partially filled offices
+  are rejected and change nothing.
+- 22: cb_distance_m is ~0 for the same point and ~111.2 km per degree of latitude.
+- 23: staff read their own team's office settings.
+
+D. SETUP: re-run supabase_schema.sql in the Supabase SQL Editor before using it.
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - OFFICE LOCATION SETTING:
+- Managers pin the team's office on a map (Leaflet + OpenStreetMap) and set the
+  allowed check-in radius (30-1000 m) on the Shifts page (section 16D).
+- New teams.office_* columns, rpc set_office_location / clear_office_location and
+  the cb_distance_m helper for the future check-in. Re-run supabase_schema.sql.
+- Tests 19-23.
+
 OCTOBER 2026 - FLEXIBLE SHIFTS & ACCESS (re-run supabase_schema.sql):
 - Any number of people per shift (the 2-per-shift limit is gone).
 - Managers set each shift's start / end time, the same every day or per weekday

@@ -1070,6 +1070,115 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------------------
+-- 7C. OFFICE LOCATION (one office per team; read later by a check-in function)
+-- ------------------------------------------------------------------------------
+-- All office columns null = not configured. Members read them through the teams
+-- SELECT policy; nobody writes teams directly, only through the functions below.
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS office_name TEXT;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS office_lat DOUBLE PRECISION;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS office_lng DOUBLE PRECISION;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS office_radius_m INTEGER;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS office_updated_at TIMESTAMPTZ;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS office_updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- Coordinates and radius in range, and either all three set or all three null
+ALTER TABLE public.teams DROP CONSTRAINT IF EXISTS teams_office_location_check;
+ALTER TABLE public.teams ADD CONSTRAINT teams_office_location_check CHECK (
+    (office_lat IS NULL AND office_lng IS NULL AND office_radius_m IS NULL)
+    OR (
+        office_lat IS NOT NULL AND office_lng IS NOT NULL AND office_radius_m IS NOT NULL
+        AND office_lat BETWEEN -90 AND 90
+        AND office_lng BETWEEN -180 AND 180
+        AND office_radius_m BETWEEN 30 AND 1000
+    )
+);
+
+-- Manager pins the team's office; who and when come from the session
+CREATE OR REPLACE FUNCTION public.set_office_location(p_name TEXT, p_lat DOUBLE PRECISION, p_lng DOUBLE PRECISION, p_radius_m INTEGER)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_team TEXT := public.current_team_id();
+    v_name TEXT := trim(coalesce(p_name, ''));
+BEGIN
+    IF NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can set the office location' USING ERRCODE = '42501';
+    END IF;
+    IF length(v_name) = 0 THEN
+        RAISE EXCEPTION 'Office name is required';
+    END IF;
+    IF length(v_name) > 80 THEN
+        RAISE EXCEPTION 'Office name can be at most 80 characters';
+    END IF;
+    IF p_lat IS NULL OR p_lng IS NULL OR p_radius_m IS NULL THEN
+        RAISE EXCEPTION 'Latitude, longitude and radius are all required';
+    END IF;
+    -- 'NaN' sorts above every number in Postgres, so it fails the range checks too
+    IF p_lat = 'NaN' OR p_lat < -90 OR p_lat > 90 THEN
+        RAISE EXCEPTION 'Latitude must be between -90 and 90';
+    END IF;
+    IF p_lng = 'NaN' OR p_lng < -180 OR p_lng > 180 THEN
+        RAISE EXCEPTION 'Longitude must be between -180 and 180';
+    END IF;
+    IF p_radius_m < 30 OR p_radius_m > 1000 THEN
+        RAISE EXCEPTION 'Radius must be between 30 and 1000 meters';
+    END IF;
+
+    UPDATE public.teams
+    SET office_name = v_name,
+        office_lat = p_lat,
+        office_lng = p_lng,
+        office_radius_m = p_radius_m,
+        office_updated_at = NOW(),
+        office_updated_by = auth.uid(),
+        updated_at = NOW()
+    WHERE id = v_team;
+END;
+$$;
+
+-- Manager removes the office (back to "not configured")
+CREATE OR REPLACE FUNCTION public.clear_office_location()
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can remove the office location' USING ERRCODE = '42501';
+    END IF;
+    UPDATE public.teams
+    SET office_name = NULL,
+        office_lat = NULL,
+        office_lng = NULL,
+        office_radius_m = NULL,
+        office_updated_at = NULL,
+        office_updated_by = NULL,
+        updated_at = NOW()
+    WHERE id = public.current_team_id();
+END;
+$$;
+
+-- Great-circle distance in meters (haversine, mean Earth radius). For the future check-in.
+CREATE OR REPLACE FUNCTION public.cb_distance_m(lat1 DOUBLE PRECISION, lng1 DOUBLE PRECISION, lat2 DOUBLE PRECISION, lng2 DOUBLE PRECISION)
+RETURNS DOUBLE PRECISION
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+    SELECT 2 * 6371008.8 * asin(least(1, sqrt(
+        power(sin(radians(lat2 - lat1) / 2), 2)
+        + cos(radians(lat1)) * cos(radians(lat2)) * power(sin(radians(lng2 - lng1) / 2), 2)
+    )))
+$$;
+
+REVOKE ALL ON FUNCTION public.set_office_location(TEXT, DOUBLE PRECISION, DOUBLE PRECISION, INTEGER) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.clear_office_location() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.cb_distance_m(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.set_office_location(TEXT, DOUBLE PRECISION, DOUBLE PRECISION, INTEGER) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.clear_office_location() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.cb_distance_m(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) TO authenticated;
+
+-- ------------------------------------------------------------------------------
 -- 8. CLAIM THE LEGACY FLEET (run by you in the SQL editor, never from the app)
 -- ------------------------------------------------------------------------------
 -- Moves every company, driver and activity that still belongs to the unclaimed

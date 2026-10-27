@@ -239,6 +239,13 @@ export function formatTashkentTime(iso) {
   });
 }
 
+// 'Oct 27, 14:05' in Tashkent (pair with formatEasternDateTime)
+export function formatTashkentDateTime(iso) {
+  return new Date(iso).toLocaleString('en-US', {
+    timeZone: SHIFT_TIMEZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  });
+}
+
 export function formatEasternDateTime(iso) {
   return new Date(iso).toLocaleString('en-US', {
     timeZone: REPORT_TIMEZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'

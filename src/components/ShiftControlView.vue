@@ -100,26 +100,38 @@
       </div>
       <span class="cb-sub small">Actions by unassigned staff are placed by the clock; where shifts overlap, the one that started first counts. A shift ending at or before its start time ends the next day (+1).</span>
     </div>
+
+    <!-- Managers only (the database rejects staff too) -->
+    <OfficeLocationCard
+      v-if="isManager"
+      @saved="emit('office-saved', $event)"
+      @error="emit('office-error', $event)"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
 import {
   SHIFTS, WEEKDAYS, getShiftConfig, shiftHours, shiftsOnDuty, currentWorkDay, addDays,
   isoWeekday, customShiftHours, formatMinutes, parseMinutes
 } from '../config/shifts';
-import { staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours } from '../services/authService';
+import {
+  staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours, isCurrentUserManager
+} from '../services/authService';
 import { fetchActivities } from '../services/activityService';
 import { initials } from '../utils/format';
+// Loaded on demand: the map library is only needed here, by managers
+const OfficeLocationCard = defineAsyncComponent(() => import('./OfficeLocationCard.vue'));
 
 const props = defineProps({
   // Bumped by the app after this user records an action
   refreshKey: { type: Number, default: 0 }
 });
 
-const emit = defineEmits(['saved']);
+const emit = defineEmits(['saved', 'office-saved', 'office-error']);
 
+const isManager = computed(() => isCurrentUserManager());
 const activeMembers = computed(() => staffProfiles.value.filter(p => p.isActive));
 const draft = reactive(Object.fromEntries(SHIFTS.map(s => [s.code, []])));
 // Per shift: { perDay, all: { start, end }, days: { 1: { start, end }, ... 7 } } as 'HH:MM'
