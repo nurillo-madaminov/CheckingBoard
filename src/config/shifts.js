@@ -1,20 +1,23 @@
+import { ref } from 'vue';
+
 /**
  * WORK SHIFTS (Tashkent time, UTC+5, no daylight saving)
  *
  * Must match public.cb_shift_of in supabase_schema.sql, which stamps every
  * activity with its shift_code and shift_date (the work day the shift started on).
+ * Hours are minutes after Tashkent midnight; a manager can change them per
+ * shift and per weekday (public.shift_hours), anything not set uses the defaults.
  */
 export const SHIFT_TIMEZONE = 'Asia/Tashkent';
 export const REPORT_TIMEZONE = 'America/New_York';
-export const STAFF_PER_SHIFT = 2;
 
 export const SHIFTS = [
   {
     code: 'MORNING',
     label: 'Morning',
     icon: '🌅',
-    start: 7,
-    end: 15,
+    startMin: 7 * 60,
+    endMin: 15 * 60,
     color: 'bg-amber-100 text-amber-800 border-amber-300',
     accent: '#d97706'
   },
@@ -22,8 +25,8 @@ export const SHIFTS = [
     code: 'AFTERNOON',
     label: 'Afternoon',
     icon: '🌇',
-    start: 13,
-    end: 23,
+    startMin: 13 * 60,
+    endMin: 23 * 60,
     color: 'bg-sky-100 text-sky-800 border-sky-300',
     accent: '#0284c7'
   },
@@ -31,12 +34,33 @@ export const SHIFTS = [
     code: 'NIGHT',
     label: 'Night',
     icon: '🌙',
-    start: 23,
-    end: 7,
+    startMin: 23 * 60,
+    endMin: 7 * 60,
     color: 'bg-indigo-100 text-indigo-800 border-indigo-300',
     accent: '#4f46e5'
   }
 ];
+
+// ISO weekdays of the day a shift starts on: 1 = Monday ... 7 = Sunday
+export const WEEKDAYS = [
+  { iso: 1, label: 'Monday', short: 'Mon' },
+  { iso: 2, label: 'Tuesday', short: 'Tue' },
+  { iso: 3, label: 'Wednesday', short: 'Wed' },
+  { iso: 4, label: 'Thursday', short: 'Thu' },
+  { iso: 5, label: 'Friday', short: 'Fri' },
+  { iso: 6, label: 'Saturday', short: 'Sat' },
+  { iso: 7, label: 'Sunday', short: 'Sun' }
+];
+
+// The team's custom hours: { 'MORNING-1': { startMin, endMin }, ... }
+export const customShiftHours = ref({});
+
+export function setCustomShiftHours(rows) {
+  customShiftHours.value = Object.fromEntries((rows || []).map(r => [
+    `${r.shift_code}-${r.weekday}`,
+    { startMin: r.start_min, endMin: r.end_min }
+  ]));
+}
 
 const TASHKENT_UTC_OFFSET_HOURS = 5;
 
@@ -66,43 +90,84 @@ export function dateRange(startDate, endDate) {
   return days;
 }
 
-function tashkentParts(date) {
-  const shifted = new Date(date.getTime() + TASHKENT_UTC_OFFSET_HOURS * 3600 * 1000);
+// Tashkent calendar date of a moment
+function tashkentDate(date) {
+  return new Date(date.getTime() + TASHKENT_UTC_OFFSET_HOURS * 3600 * 1000).toISOString().substring(0, 10);
+}
+
+// ISO weekday (1 = Monday ... 7 = Sunday) of a 'YYYY-MM-DD'
+export function isoWeekday(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+// '07:30' <-> 450 (minutes after midnight)
+export function formatMinutes(minutes) {
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
+export function parseMinutes(hhmm) {
+  const [h, m] = String(hhmm || '').split(':').map(Number);
+  return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+}
+
+// { startMin, endMin } of a shift on a work day: the team's custom hours, else the default
+export function hoursOn(shiftCode, workDay) {
+  const custom = customShiftHours.value[`${shiftCode}-${isoWeekday(workDay)}`];
+  if (custom) return custom;
+  const s = getShiftConfig(shiftCode);
+  return { startMin: s.startMin, endMin: s.endMin };
+}
+
+// UTC instant of a Tashkent wall-clock time (minutes after midnight) on a given date
+function tashkentInstant(dateStr, minutes) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, -TASHKENT_UTC_OFFSET_HOURS, minutes));
+}
+
+// One run of a shift that starts on a work day; it ends the next day if it passes midnight
+function shiftRun(code, day, hours = hoursOn(code, day)) {
   return {
-    dateStr: shifted.toISOString().substring(0, 10),
-    hour: shifted.getUTCHours()
+    code,
+    day,
+    start: tashkentInstant(day, hours.startMin),
+    end: tashkentInstant(hours.endMin <= hours.startMin ? addDays(day, 1) : day, hours.endMin)
   };
 }
 
 /**
- * The work day happening right now: before 07:00 Tashkent it is still the
- * previous day's night shift.
+ * The shift run a moment belongs to, by the same rule as public.cb_shift_of:
+ * the run (started yesterday or today) that covers it, the earlier-starting one
+ * in an overlap; between runs, the nearest one. { code, day, start, end }
  */
+export function placeShift(now = new Date(), assignedCode = '') {
+  const today = tashkentDate(now);
+  const runs = SHIFTS
+    .filter(s => !assignedCode || s.code === assignedCode)
+    .flatMap(s => [shiftRun(s.code, addDays(today, -1)), shiftRun(s.code, today)]);
+  // 0 inside [start, end); the end itself already belongs to the next shift
+  const distance = r => (now >= r.end ? now - r.end + 1 : Math.max(r.start - now, 0));
+  return runs.sort((a, b) => (distance(a) - distance(b)) || (a.start - b.start))[0];
+}
+
+// The work day happening right now (a shift past midnight still belongs to the day it began)
 export function currentWorkDay(now = new Date()) {
-  const { dateStr, hour } = tashkentParts(now);
-  return hour < 7 ? addDays(dateStr, -1) : dateStr;
+  return placeShift(now).day;
 }
 
-// Shift that is on the clock right now (overlap 13:00-15:00 shows MORNING, like the database)
+// Shift that is on the clock right now (in an overlap, the earlier one, like the database)
 export function currentShiftCode(now = new Date()) {
-  const { hour } = tashkentParts(now);
-  if (hour >= 7 && hour < 15) return 'MORNING';
-  if (hour >= 15 && hour < 23) return 'AFTERNOON';
-  return 'NIGHT';
+  return placeShift(now).code;
 }
 
-// Every shift whose hours include this moment (two during the 13:00-15:00 overlap)
+// Every shift whose hours include this moment (more than one during an overlap)
 export function shiftsOnDuty(now = new Date()) {
-  const { hour } = tashkentParts(now);
-  return SHIFTS.filter(s => (s.start < s.end
-    ? hour >= s.start && hour < s.end
-    : hour >= s.start || hour < s.end)).map(s => s.code);
-}
-
-// UTC instant of a Tashkent wall-clock hour on a given date
-function tashkentInstant(dateStr, hour) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d, hour - TASHKENT_UTC_OFFSET_HOURS));
+  const today = tashkentDate(now);
+  return SHIFTS.filter(s => [addDays(today, -1), today].some(day => {
+    const run = shiftRun(s.code, day);
+    return now >= run.start && now < run.end;
+  })).map(s => s.code);
 }
 
 function formatEastern(date) {
@@ -113,34 +178,32 @@ function formatEastern(date) {
  * Shift hours in both timezones for a work day, e.g.
  * { tashkent: '07:00 – 15:00', eastern: '10:00 PM – 6:00 AM ET' }
  * Eastern hours move with US daylight saving, so they depend on the date.
+ * Pass hours to format unsaved ones.
  */
-export function shiftHours(shiftCode, workDay = currentWorkDay()) {
-  const s = getShiftConfig(shiftCode);
-  const start = tashkentInstant(workDay, s.start);
-  const end = tashkentInstant(s.end <= s.start ? addDays(workDay, 1) : workDay, s.end);
+export function shiftHours(shiftCode, workDay = currentWorkDay(), hours = hoursOn(shiftCode, workDay)) {
+  const run = shiftRun(shiftCode, workDay, hours);
   return {
-    tashkent: `${pad(s.start)}:00 – ${pad(s.end)}:00`,
-    eastern: `${formatEastern(start)} – ${formatEastern(end)} ET`
+    tashkent: `${formatMinutes(hours.startMin)} – ${formatMinutes(hours.endMin)}`,
+    eastern: `${formatEastern(run.start)} – ${formatEastern(run.end)} ET`
   };
 }
 
 /**
- * How far the shift on the clock has run: { code, pct, left: '7h 18m left' }
+ * How far the shift on the clock has run: { code, day, start, end, pct, left: '7h 18m left' }
  */
 export function shiftProgress(now = new Date()) {
-  const code = currentShiftCode(now);
-  const s = getShiftConfig(code);
-  const day = currentWorkDay(now);
-  const start = tashkentInstant(day, s.start);
-  const end = tashkentInstant(s.end <= s.start ? addDays(day, 1) : day, s.end);
+  const { code, day, start, end } = placeShift(now);
   const total = end - start;
-  const leftMin = Math.max(0, Math.round((end - now) / 60000));
+  const before = now < start;
+  const leftMin = Math.max(0, Math.round(((before ? start : end) - now) / 60000));
+  const span = `${Math.floor(leftMin / 60)}h ${pad(leftMin % 60)}m`;
   return {
     code,
+    day,
     start,
     end,
     pct: Math.max(0, Math.min(100, ((now - start) / total) * 100)),
-    left: `${Math.floor(leftMin / 60)}h ${pad(leftMin % 60)}m left`
+    left: before ? `starts in ${span}` : `${span} left`
   };
 }
 

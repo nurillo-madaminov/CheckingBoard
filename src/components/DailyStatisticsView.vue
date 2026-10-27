@@ -64,8 +64,8 @@
         </div>
       </div>
 
-      <!-- Per staff -->
-      <div class="cb-panel">
+      <!-- Per staff (scrolls sideways on narrow screens) -->
+      <div class="cb-panel per-staff">
         <div class="cb-grid-head staff-grid">
           <div class="pad">Per staff member</div><div>Shift</div>
           <div v-for="act in ACTION_TYPES" :key="act.code" class="right">{{ act.short }}</div>
@@ -221,7 +221,7 @@ onMounted(() => {
 
 .split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; }
 .chart { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
-.chart-head { display: flex; align-items: center; gap: 14px; }
+.chart-head { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
 .section-title { font-family: var(--font-heading); font-weight: 600; font-size: 20px; text-transform: uppercase; }
 .legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-neutral-700); }
 .swatch { width: 10px; height: 10px; }
@@ -262,5 +262,19 @@ onMounted(() => {
   .act-tile:nth-child(4) { border-left: 0; }
   .act-tile:nth-child(n + 4) { border-top: 1px solid var(--color-divider); }
   .split { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .per-staff { overflow-x: auto; }
+  .staff-grid { min-width: 720px; }
+}
+@media (max-width: 600px) {
+  .totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .total-tile, .act-tile { padding: 12px; }
+  .total-num { font-size: 38px; }
+  .act-num { font-size: 28px; }
+  .act-tile:nth-child(n) { border-left: 1px solid var(--color-divider); }
+  .act-tile:nth-child(odd) { border-left: 0; }
+  .act-tile:nth-child(n + 3) { border-top: 1px solid var(--color-divider); }
+  .columns { height: 150px; }
 }
 </style>

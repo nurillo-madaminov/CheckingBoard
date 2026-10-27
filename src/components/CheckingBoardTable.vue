@@ -86,7 +86,7 @@
         </div>
 
         <div v-if="companies.length === 0" class="empty">
-          {{ canManageFleet ? 'No companies yet. Add one with + Company.' : 'No companies yet. A manager adds companies and drivers.' }}
+          {{ canManageFleet ? 'No companies yet. Add one with + Company.' : 'No companies yet. A manager adds companies.' }}
         </div>
 
         <div v-for="(group, gIdx) in groups" :key="group.company.id">
@@ -129,7 +129,7 @@
             />
             <div v-if="group.rows.length === 0" class="group-empty">
               No drivers yet in {{ group.company.name }}.
-              <button v-if="canManageFleet && currentTab.id === 'CHECKING_BOARD'" class="btn btn-ghost" @click="$emit('add-driver', group.company)">Add the first driver</button>
+              <button v-if="currentTab.id === 'CHECKING_BOARD'" class="btn btn-ghost" @click="$emit('add-driver', group.company)">Add the first driver</button>
             </div>
           </template>
         </div>
@@ -179,7 +179,7 @@ const props = defineProps({
   tabCounts: { type: Object, required: true },
   searchQuery: { type: String, default: '' },
   selectedDriverId: { type: String, default: '' },
-  // Managers add / delete drivers and companies; staff only work the board
+  // Managers add / delete companies and delete drivers; everyone adds drivers and works the board
   canManageFleet: { type: Boolean, default: false },
   // Today's action records, for the "Actions this shift" card
   todayActivities: { type: Array, default: () => [] },
@@ -507,7 +507,7 @@ function tabDropStyle(tabId) {
   --board-cols: 52px minmax(240px, 1.3fr) 128px 168px 108px minmax(160px, 1.6fr);
   height: 100%; display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; min-height: 0;
 }
-.top { display: flex; align-items: center; gap: 12px; }
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .title-block { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .search { position: relative; width: 300px; min-width: 160px; flex-shrink: 1; }
 .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--color-neutral-600); }
@@ -595,6 +595,26 @@ function tabDropStyle(tabId) {
   }
   .tab { padding: 0 9px; font-size: 12px; letter-spacing: 0.02em; }
   .hint { display: none; }
+}
+@media (max-width: 1100px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+}
+/* Narrow: the toolbar wraps under the title, columns get tighter (the board scrolls sideways) */
+@media (max-width: 900px) {
+  .board-page {
+    --board-num-col: 36px;
+    --board-cols: 36px minmax(150px, 1.4fr) 96px 124px 72px minmax(110px, 1fr);
+    gap: 10px; padding: 12px;
+  }
+  .title-block { flex: 1 1 100%; }
+  .search { flex: 1 1 200px; width: auto; }
+}
+@media (max-width: 600px) {
+  .kpi { padding: 10px 12px; gap: 6px; }
+  .kpi-num { font-size: 28px; }
+  .kpi-of { font-size: 16px; }
+  .kpi-side { display: none; }
+  .kpi-head .cb-label { white-space: normal; flex-shrink: 1; }
 }
 @media (max-height: 720px) { .kpis { display: none; } }
 </style>

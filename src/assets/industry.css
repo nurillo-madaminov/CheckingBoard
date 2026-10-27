@@ -139,6 +139,10 @@ select.input {
 .cb-panel { background: var(--color-neutral-100); border: 1px solid var(--color-divider); box-shadow: var(--shadow-sm); }
 .cb-page { flex: 1; min-height: 0; overflow: auto; padding: 18px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
 .cb-page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .cb-page { padding: 12px; gap: 10px; }
+  .cb-title { font-size: 24px; }
+}
 .cb-page-head > .cb-spacer, .cb-spacer { flex: 1; }
 .cb-avatar {
   flex-shrink: 0; display: grid; place-items: center;

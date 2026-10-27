@@ -161,6 +161,17 @@ AS $$
     )
 $$;
 
+-- The signed-in member's current shift (activity visibility, shift-wide notifications)
+CREATE OR REPLACE FUNCTION public.current_shift_code()
+RETURNS TEXT
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT shift_code FROM public.staff_profiles
+    WHERE id = auth.uid()::text AND is_active
+    LIMIT 1
+$$;
+
 CREATE OR REPLACE FUNCTION public.login_email(p_username TEXT)
 RETURNS TEXT
 LANGUAGE sql IMMUTABLE
@@ -205,8 +216,8 @@ CREATE POLICY "Members read their team roster"
     ON public.staff_profiles FOR SELECT TO authenticated
     USING (team_id = public.current_team_id());
 
--- Everyone in the team reads and edits companies / drivers;
--- only managers add or remove them.
+-- Everyone in the team reads and edits companies / drivers and adds drivers;
+-- only managers add companies or remove either.
 CREATE POLICY "Members read their team companies"
     ON public.companies FOR SELECT TO authenticated
     USING (team_id = public.current_team_id());
@@ -239,11 +250,11 @@ CREATE POLICY "Members edit their team drivers"
         )
     );
 
-CREATE POLICY "Managers add drivers"
+-- Staff and managers both add drivers; only managers remove them
+CREATE POLICY "Members add drivers"
     ON public.drivers FOR INSERT TO authenticated
     WITH CHECK (
         team_id = public.current_team_id()
-        AND public.is_team_manager()
         AND EXISTS (
             SELECT 1 FROM public.companies c
             WHERE c.id = company_id AND c.team_id = public.current_team_id()
@@ -254,12 +265,25 @@ CREATE POLICY "Managers remove drivers"
     ON public.drivers FOR DELETE TO authenticated
     USING (team_id = public.current_team_id() AND public.is_team_manager());
 
--- Staff read only their own records; managers read the whole team
-CREATE POLICY "Staff read own activities, managers read team"
+-- Staff read their own records and those their shift-mates logged on their shift
+-- (credited to the shift they are on now, by someone on it now); managers read the whole team
+CREATE POLICY "Staff read own and shift activities, managers read team"
     ON public.activities FOR SELECT TO authenticated
     USING (
         team_id = public.current_team_id()
-        AND (staff_user_id = auth.uid()::text OR public.is_team_manager())
+        AND (
+            staff_user_id = auth.uid()::text
+            OR public.is_team_manager()
+            OR (
+                activities.shift_code = public.current_shift_code()
+                AND EXISTS (
+                    SELECT 1 FROM public.staff_profiles p
+                    WHERE p.id = activities.staff_user_id
+                      AND p.team_id = activities.team_id
+                      AND p.shift_code = activities.shift_code
+                )
+            )
+        )
     );
 
 -- Inserts are stamped by the trigger below; the check makes forgery impossible.
@@ -277,30 +301,80 @@ CREATE POLICY "Members record activities as themselves"
 -- 4. ACTIVITY ACTOR & SHIFT STAMPING
 --    Actor, name snapshot, team, time and shift come from the session - never from the client.
 -- ------------------------------------------------------------------------------
--- Shifts run on Tashkent time (UTC+5, no daylight saving):
+-- Shifts run on Tashkent time (UTC+5, no daylight saving). Default hours:
 --   MORNING 07:00-15:00, AFTERNOON 13:00-23:00, NIGHT 23:00-07:00
+-- A manager can change the hours of each shift, separately for each day of the
+-- week (public.shift_hours; days without a row use the defaults).
 -- An action is credited to the shift its author is assigned to; someone with no
--- assigned shift is placed by the clock (the 13:00-15:00 overlap counts as MORNING).
--- The work day is the Tashkent date the shift starts on, so a NIGHT shift that
--- runs past midnight still belongs to the day it began.
-CREATE OR REPLACE FUNCTION public.cb_shift_of(p_at TIMESTAMPTZ, p_assigned TEXT DEFAULT NULL)
+-- assigned shift is placed by the clock (in an overlap, the earlier-starting shift wins).
+-- The work day is the Tashkent date the shift starts on, so a shift that runs
+-- past midnight still belongs to the day it began. An action outside the hours
+-- (early start, late finish) goes to the nearest run of the shift.
+
+-- Custom hours, minutes after Tashkent midnight; weekday 1 = Monday ... 7 = Sunday
+-- of the day the shift starts. end_min <= start_min means it ends the next day.
+CREATE TABLE IF NOT EXISTS public.shift_hours (
+    team_id TEXT NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+    shift_code TEXT NOT NULL CHECK (shift_code IN ('MORNING', 'AFTERNOON', 'NIGHT')),
+    weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+    start_min SMALLINT NOT NULL CHECK (start_min BETWEEN 0 AND 1439),
+    end_min SMALLINT NOT NULL CHECK (end_min BETWEEN 0 AND 1439),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (team_id, shift_code, weekday),
+    CHECK (start_min <> end_min)
+);
+ALTER TABLE public.shift_hours ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Members read their team shift hours" ON public.shift_hours;
+-- Read-only to clients; managers change it through save_shift_hours
+CREATE POLICY "Members read their team shift hours"
+    ON public.shift_hours FOR SELECT TO authenticated
+    USING (team_id = public.current_team_id());
+
+-- Hours of one shift on one work day (custom row, else the default)
+CREATE OR REPLACE FUNCTION public.cb_shift_hours(p_team TEXT, p_shift TEXT, p_day DATE)
+RETURNS TABLE (start_min INT, end_min INT)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT coalesce(h.start_min, d.start_min)::int, coalesce(h.end_min, d.end_min)::int
+    FROM (VALUES ('MORNING', 420, 900), ('AFTERNOON', 780, 1380), ('NIGHT', 1380, 420)) AS d(code, start_min, end_min)
+    LEFT JOIN public.shift_hours h
+      ON h.team_id = p_team AND h.shift_code = d.code AND h.weekday = extract(isodow FROM p_day)::int
+    WHERE d.code = p_shift
+$$;
+
+-- The old two-argument version placed shifts by fixed hours
+DROP FUNCTION IF EXISTS public.cb_shift_of(TIMESTAMPTZ, TEXT);
+
+CREATE OR REPLACE FUNCTION public.cb_shift_of(p_at TIMESTAMPTZ, p_assigned TEXT DEFAULT NULL, p_team TEXT DEFAULT NULL)
 RETURNS TABLE (shift_code TEXT, shift_date DATE)
-LANGUAGE sql STABLE
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
     WITH t AS (
-        SELECT p_at AT TIME ZONE 'Asia/Tashkent' AS local_ts,
-               extract(hour FROM p_at AT TIME ZONE 'Asia/Tashkent')::int AS h
-    ), s AS (
-        SELECT local_ts, h,
-               coalesce(p_assigned, CASE
-                   WHEN h >= 7 AND h < 15 THEN 'MORNING'
-                   WHEN h >= 15 AND h < 23 THEN 'AFTERNOON'
-                   ELSE 'NIGHT'
-               END) AS code
+        SELECT p_at AT TIME ZONE 'Asia/Tashkent' AS ts
+    ), runs AS (
+        -- Every run of every candidate shift that starts yesterday or today
+        SELECT c.code, d.day,
+               d.day + make_interval(mins => h.start_min) AS starts,
+               d.day + make_interval(mins => h.end_min)
+                     + CASE WHEN h.end_min <= h.start_min THEN interval '1 day' ELSE interval '0' END AS ends
         FROM t
+        CROSS JOIN (VALUES ('MORNING'), ('AFTERNOON'), ('NIGHT')) AS c(code)
+        CROSS JOIN LATERAL (VALUES (t.ts::date - 1), (t.ts::date)) AS d(day)
+        CROSS JOIN LATERAL public.cb_shift_hours(p_team, c.code, d.day) AS h
+        WHERE p_assigned IS NULL OR c.code = p_assigned
     )
-    SELECT code, local_ts::date - CASE WHEN code = 'NIGHT' AND h < 12 THEN 1 ELSE 0 END
-    FROM s
+    SELECT r.code, r.day
+    FROM runs r, t
+    -- Inside a run [starts, ends) = distance 0; overlaps go to the run that started first
+    ORDER BY CASE
+                 WHEN t.ts >= r.ends THEN t.ts - r.ends + interval '1 microsecond'
+                 WHEN t.ts < r.starts THEN r.starts - t.ts
+                 ELSE interval '0'
+             END,
+             r.starts
+    LIMIT 1
 $$;
 
 CREATE OR REPLACE FUNCTION public.activities_stamp_actor()
@@ -317,7 +391,7 @@ BEGIN
         -- SQL editor / service role maintenance; RLS still blocks anonymous clients
         IF NEW.shift_date IS NULL THEN
             SELECT s.shift_code, s.shift_date INTO NEW.shift_code, NEW.shift_date
-            FROM public.cb_shift_of(coalesce(NEW.action_at, NOW())) s;
+            FROM public.cb_shift_of(coalesce(NEW.action_at, NOW()), NULL, NEW.team_id) s;
         END IF;
         RETURN NEW;
     END IF;
@@ -336,7 +410,7 @@ BEGIN
     NEW.action_at := NOW();
     NEW.created_at := NOW();
     SELECT s.shift_code, s.shift_date INTO NEW.shift_code, NEW.shift_date
-    FROM public.cb_shift_of(NOW(), me.shift_code) s;
+    FROM public.cb_shift_of(NOW(), me.shift_code, me.team_id) s;
     IF NEW.id IS NULL OR NEW.id = '' THEN
         NEW.id := 'act-' || replace(gen_random_uuid()::text, '-', '');
     END IF;
@@ -397,7 +471,7 @@ CREATE TRIGGER companies_guard_details
 
 -- Records from before shifts existed: place them by the clock
 UPDATE public.activities a
-SET (shift_code, shift_date) = (SELECT s.shift_code, s.shift_date FROM public.cb_shift_of(a.action_at) s)
+SET (shift_code, shift_date) = (SELECT s.shift_code, s.shift_date FROM public.cb_shift_of(a.action_at, NULL, a.team_id) s)
 WHERE a.shift_date IS NULL;
 
 -- ------------------------------------------------------------------------------
@@ -622,7 +696,7 @@ $$;
 
 -- Manager sets the whole shift schedule at once:
 --   {"MORNING": [staff ids], "AFTERNOON": [...], "NIGHT": [...]}
--- At most 2 people per shift, one shift per person; anyone left out is unassigned.
+-- Any number of people per shift, one shift per person; anyone left out is unassigned.
 CREATE OR REPLACE FUNCTION public.save_shift_schedule(p_schedule JSONB)
 RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER
@@ -640,9 +714,6 @@ BEGIN
 
     FOREACH v_shift IN ARRAY ARRAY['MORNING', 'AFTERNOON', 'NIGHT'] LOOP
         v_ids := ARRAY(SELECT jsonb_array_elements_text(coalesce(p_schedule -> v_shift, '[]'::jsonb)));
-        IF cardinality(v_ids) > 2 THEN
-            RAISE EXCEPTION 'Each shift can have at most 2 staff';
-        END IF;
         IF v_ids && v_all THEN
             RAISE EXCEPTION 'A person can be on only one shift';
         END IF;
@@ -670,6 +741,40 @@ BEGIN
           AND shift_code IS DISTINCT FROM v_shift
           AND id = ANY (ARRAY(SELECT jsonb_array_elements_text(coalesce(p_schedule -> v_shift, '[]'::jsonb))));
     END LOOP;
+END;
+$$;
+
+-- Manager replaces the team's shift hours:
+--   [{"shift_code": "MORNING", "weekday": 1, "start_min": 420, "end_min": 900}, ...]
+-- Days left out use the default hours.
+CREATE OR REPLACE FUNCTION public.save_shift_hours(p_hours JSONB)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_team TEXT := public.current_team_id();
+BEGIN
+    IF NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can change shift hours' USING ERRCODE = '42501';
+    END IF;
+    IF jsonb_typeof(coalesce(p_hours, '[]'::jsonb)) <> 'array' THEN
+        RAISE EXCEPTION 'Shift hours must be a list';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_to_recordset(coalesce(p_hours, '[]'::jsonb))
+            AS r(shift_code TEXT, weekday INT, start_min INT, end_min INT)
+        WHERE r.start_min IS NOT DISTINCT FROM r.end_min
+    ) THEN
+        RAISE EXCEPTION 'A shift cannot start and end at the same time';
+    END IF;
+
+    DELETE FROM public.shift_hours WHERE team_id = v_team;
+    -- The table checks reject unknown shifts, days and times
+    INSERT INTO public.shift_hours (team_id, shift_code, weekday, start_min, end_min)
+    SELECT v_team, r.shift_code, r.weekday, r.start_min, r.end_min
+    FROM jsonb_to_recordset(coalesce(p_hours, '[]'::jsonb))
+        AS r(shift_code TEXT, weekday INT, start_min INT, end_min INT);
 END;
 $$;
 
@@ -705,6 +810,11 @@ REVOKE ALL ON FUNCTION public.run_daily_sign_reset() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.run_daily_sign_reset() TO authenticated;
 REVOKE ALL ON FUNCTION public.save_shift_schedule(JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_shift_schedule(JSONB) TO authenticated;
+REVOKE ALL ON FUNCTION public.save_shift_hours(JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_shift_hours(JSONB) TO authenticated;
+-- Internal: only the activity trigger places actions in shifts
+REVOKE ALL ON FUNCTION public.cb_shift_hours(TEXT, TEXT, DATE) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.cb_shift_of(TIMESTAMPTZ, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.save_driver_order(JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_driver_order(JSONB) TO authenticated;
 REVOKE ALL ON FUNCTION public.save_company_order(JSONB) FROM PUBLIC, anon;
@@ -733,6 +843,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.companies, public.drivers TO auth
 GRANT SELECT, INSERT ON public.activities TO authenticated;
 REVOKE INSERT, UPDATE, DELETE ON public.teams, public.staff_profiles FROM authenticated;
 REVOKE UPDATE, DELETE, TRUNCATE ON public.activities FROM authenticated;
+REVOKE ALL ON public.shift_hours FROM anon;
+GRANT SELECT ON public.shift_hours TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.shift_hours FROM authenticated;
 
 -- ------------------------------------------------------------------------------
 -- 7. REALTIME (live sync between dispatchers)
@@ -760,16 +873,7 @@ END $$;
 -- ------------------------------------------------------------------------------
 -- 7B. NOTIFICATIONS (manager -> staff) AND EXTENSIONS (manager publishes, team downloads)
 -- ------------------------------------------------------------------------------
--- The signed-in member's current shift (for shift-wide notifications)
-CREATE OR REPLACE FUNCTION public.current_shift_code()
-RETURNS TEXT
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-    SELECT shift_code FROM public.staff_profiles
-    WHERE id = auth.uid()::text AND is_active
-    LIMIT 1
-$$;
+-- (public.current_shift_code() is defined with the session helpers in step 2)
 
 -- audience: ALL = whole team, SHIFT = everyone on audience_shift, STAFF = one person
 CREATE TABLE IF NOT EXISTS public.notifications (

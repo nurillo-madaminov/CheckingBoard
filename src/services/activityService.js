@@ -55,8 +55,9 @@ export async function recordActivity({ driver = null, company = null, actionType
 
 /**
  * Fetch action records for a range of work days (inclusive, 'YYYY-MM-DD').
- * Row Level Security already limits staff to their own records and managers to
- * their whole team; the filters narrow it further.
+ * Row Level Security already limits staff to their own records plus their
+ * shift-mates' on their shift, and managers to their whole team; the filters
+ * narrow it further.
  */
 export async function fetchActivities({ fromDate, toDate, shiftCode = '', staffUserId = '', actionType = '' } = {}) {
   return fetchAllRows(() => {
