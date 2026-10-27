@@ -18,7 +18,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <!-- SIGNED IN: SIDEBAR + CURRENT VIEW -->
   <div v-else class="shell">
     <SideNav
-      v-model:collapsed="sidebarCollapsed"
+      :collapsed="railCollapsed"
       :activeView="activeView"
       :currentUser="currentUser"
       :teamName="currentTeam?.name || ''"
@@ -28,7 +28,8 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :roster="staffProfiles"
       :unreadCount="unreadCount"
       :notificationsOpen="showNotifications"
-      @navigate="activeView = $event"
+      @update:collapsed="toggleSidebar"
+      @navigate="navigateTo"
       @open-notifications="showNotifications = !showNotifications"
       @open-staff="showStaffModal = true"
       @logout="handleLogout"
@@ -41,7 +42,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :unreadIds="unreadIdsAtOpen"
       :isManager="isManager"
       :roster="staffProfiles"
-      :sidebarCollapsed="sidebarCollapsed"
+      :sidebarCollapsed="railCollapsed"
       @close="showNotifications = false"
       @changed="loadNotifications"
       @sent="showToast({ title: 'Notification sent', message: $event })"
@@ -202,7 +203,8 @@ import { driverLabel as driverLabelOf } from './utils/format';
 // State: everything comes from the shared team database
 // ---------------------------------------------------------------------------
 const currentUser = computed(() => currentStaffUser.value);
-// Only managers add or remove drivers and companies (also enforced by the database)
+// Only managers add or remove companies and remove drivers; everyone adds drivers
+// (also enforced by the database)
 const isManager = computed(() => currentUser.value?.role === 'manager');
 const authLoading = ref(isSupabaseConfigured);
 const companies = ref([]);
@@ -232,7 +234,29 @@ watch(sidebarCollapsed, (value) => {
     // Preference not saved; it still applies for this session
   }
 });
-// Today's action records (staff: their own, manager: the team) for the sidebar and KPI cards
+
+// On narrow screens the sidebar is an icon rail unless opened for a moment;
+// that doesn't change the saved preference for wide screens.
+const narrowQuery = window.matchMedia('(max-width: 900px)');
+const isNarrow = ref(narrowQuery.matches);
+const narrowOpen = ref(false);
+function onNarrowChange(e) {
+  isNarrow.value = e.matches;
+  narrowOpen.value = false;
+}
+narrowQuery.addEventListener('change', onNarrowChange);
+const railCollapsed = computed(() => (isNarrow.value ? !narrowOpen.value : sidebarCollapsed.value));
+
+function toggleSidebar() {
+  if (isNarrow.value) narrowOpen.value = !narrowOpen.value;
+  else sidebarCollapsed.value = !sidebarCollapsed.value;
+}
+
+function navigateTo(view) {
+  activeView.value = view;
+  narrowOpen.value = false;
+}
+// Today's action records (staff: their own and their shift-mates', manager: the team) for the sidebar and KPI cards
 const todayActivities = ref([]);
 let signResetTimer = null;
 let todayTimer = null;
@@ -412,6 +436,7 @@ onMounted(async () => {
 onUnmounted(() => {
   leaveTeam();
   authSubscription?.unsubscribe();
+  narrowQuery.removeEventListener('change', onNarrowChange);
 });
 
 // ---------------------------------------------------------------------------
@@ -706,7 +731,6 @@ async function handleReorderCompany({ draggedId, targetId, position }) {
 // Driver Management
 // ---------------------------------------------------------------------------
 function openAddDriverForCompany(company) {
-  if (!isManager.value) return;
   editingDriver.value = null;
   targetCompanyId.value = company.id;
   showDriverModal.value = true;
@@ -759,7 +783,6 @@ async function saveDriver(driverData) {
     return;
   }
 
-  if (!isManager.value) return;
   const maxOrder = drivers.value.reduce((m, d) => Math.max(m, d.orderIndex || 0), 0);
   const newDriver = {
     id: db.newId('drv'),
@@ -872,17 +895,18 @@ function handleResetData() {
 </script>
 
 <style scoped>
-.shell { height: 100vh; display: flex; overflow: hidden; background: var(--color-surface); user-select: none; }
+/* dvh: phone browser bars don't push the bottom of the app off screen */
+.shell { height: 100vh; height: 100dvh; display: flex; overflow: hidden; background: var(--color-surface); user-select: none; }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 
-.center-screen { height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--color-surface); }
+.center-screen { height: 100vh; height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--color-surface); }
 .loading { font-family: var(--font-heading); font-size: 18px; color: var(--color-neutral-700); }
 .setup { width: min(520px, 100%); }
 .setup-code { margin: 0; padding: 12px; font-size: 12px; background: var(--color-bg); border: 1px solid var(--color-divider); white-space: pre-wrap; }
 
 .toasts { position: fixed; top: 16px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .toast {
-  pointer-events: auto; width: 320px; height: 64px; padding: 10px 14px; cursor: pointer;
+  pointer-events: auto; width: min(320px, calc(100vw - 32px)); height: 64px; padding: 10px 14px; cursor: pointer;
   display: flex; align-items: center; gap: 12px;
   background: var(--color-neutral-100); border: 1px solid var(--color-divider); box-shadow: var(--shadow-md);
 }

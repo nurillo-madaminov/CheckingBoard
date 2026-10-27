@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { supabase } from './supabaseClient';
+import { setCustomShiftHours } from '../config/shifts';
 
 /**
  * AUTH & TEAM SERVICE (Supabase Auth + public.staff_profiles)
@@ -90,8 +91,25 @@ export async function loadCurrentProfile() {
   }
 
   currentStaffUser.value = mapProfile(data);
-  await Promise.all([loadTeam(), loadTeamRoster()]);
+  await Promise.all([loadTeam(), loadTeamRoster(), loadShiftHours()]);
   return currentStaffUser.value;
+}
+
+/**
+ * The team's custom shift hours. If they can't be read (for example the
+ * database script hasn't been re-run yet), the default hours apply.
+ */
+export async function loadShiftHours() {
+  const { data, error } = await supabase
+    .from('shift_hours')
+    .select('shift_code, weekday, start_min, end_min');
+  if (error) {
+    console.warn('Could not load shift hours, using the defaults:', error.message);
+    setCustomShiftHours([]);
+    return [];
+  }
+  setCustomShiftHours(data);
+  return data;
 }
 
 export async function loadTeam() {
@@ -198,6 +216,20 @@ export async function saveShiftSchedule(schedule) {
   await loadTeamRoster();
 }
 
+/**
+ * Manager replaces the shift hours: [{ shift_code, weekday (1 = Monday), start_min, end_min }]
+ */
+export async function saveShiftHours(rows) {
+  const { error } = await supabase.rpc('save_shift_hours', { p_hours: rows });
+  if (error) {
+    if (/save_shift_hours/.test(error.message || '')) {
+      throw new Error('Custom shift hours need the updated database script. Run supabase_schema.sql in the Supabase SQL Editor, then try again.');
+    }
+    throw friendlyError(error, 'Failed to save the shift hours');
+  }
+  await loadShiftHours();
+}
+
 export async function updateMyDisplayName(displayName) {
   const { error } = await supabase.rpc('update_my_display_name', { p_display_name: (displayName || '').trim() });
   if (error) throw friendlyError(error, 'Failed to update name');
@@ -209,6 +241,7 @@ export async function logoutUser() {
   currentStaffUser.value = null;
   staffProfiles.value = [];
   currentTeam.value = null;
+  setCustomShiftHours([]);
   if (supabase) {
     try {
       await supabase.auth.signOut();

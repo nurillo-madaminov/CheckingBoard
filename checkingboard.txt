@@ -423,36 +423,64 @@ A. WHAT IS LOGGED:
   action_type. Older records of other types stay in the database but are not shown.
 
 B. SHIFTS (Tashkent time, UTC+5, no daylight saving; src/config/shifts.js):
-- MORNING 07:00-15:00, AFTERNOON 13:00-23:00, NIGHT 23:00-07:00, 2 staff per shift.
+- Default hours: MORNING 07:00-15:00, AFTERNOON 13:00-23:00, NIGHT 23:00-07:00.
   Pages also show the hours converted to US Eastern for the day (follows EST/EDT).
-- staff_profiles.shift_code holds each person's assigned shift. Managers change the
-  whole schedule at once with rpc save_shift_schedule({MORNING:[ids],AFTERNOON:[ids],
-  NIGHT:[ids]}): max 2 per shift, one shift per person, people left out are unassigned.
-- Every activity is stamped by the database trigger (public.cb_shift_of) with:
+- Custom hours: managers set each shift's start and end time, either the same every
+  day or different per weekday. Stored in public.shift_hours (team_id, shift_code,
+  weekday 1 = Monday ... 7 = Sunday of the day the shift STARTS, start_min / end_min
+  = minutes after Tashkent midnight; end <= start means it ends the next day).
+  Managers replace the whole set with rpc save_shift_hours([{shift_code, weekday,
+  start_min, end_min}]); days without a row use the defaults. Members read their
+  team's rows; nobody writes the table directly.
+- Any number of people per shift. staff_profiles.shift_code holds each person's
+  assigned shift. Managers change the whole schedule at once with rpc
+  save_shift_schedule({MORNING:[ids],AFTERNOON:[ids],NIGHT:[ids]}): one shift per
+  person, people left out are unassigned.
+- Every activity is stamped by the database trigger (public.cb_shift_of(p_at,
+  p_assigned, p_team), which reads the team's hours) with:
   * shift_code: the shift its author is assigned to at that moment; someone with no
-    shift is placed by the clock (13:00-15:00 overlap counts as MORNING).
-  * shift_date: the WORK DAY = Tashkent date the shift started. A work day runs from
-    07:00 Tashkent to 07:00 the next day, so a night shift past midnight belongs to the
-    day it began. Old records were backfilled by the clock.
-- Reassigning someone later never changes past records.
+    shift is placed by the clock. Of the shift runs that started yesterday or today,
+    the one covering the moment wins (start inclusive, end exclusive); in an overlap
+    the run that started first wins (by default 13:00-15:00 counts as MORNING).
+    An action outside every run (early start, late finish, a gap between custom
+    hours) goes to the nearest run.
+  * shift_date: the WORK DAY = Tashkent date the chosen run started, so a shift past
+    midnight belongs to the day it began. Old records were backfilled by the clock.
+  src/config/shifts.js applies the same rule for the sidebar, board and Shifts page.
+- Reassigning someone or changing hours later never changes past records.
 
 C. MANAGER PAGES (top bar):
-- Logs (staff see only their own): pick a work day (◀ ▶ / date) and a shift
-  (All / Morning / Afternoon / Night); filter by staff, action and driver/company.
-  Each row shows the exact time in Tashkent and US Eastern, shift, staff, driver,
-  action and note, plus per-action counts for the selection.
-- Shifts: shift control panel. Three shift cards with 2 staff slots each, "On duty
-  now" badge, unassigned list, Save Schedule / Discard.
+- Logs: managers see the whole team. Staff see their own actions plus the actions
+  logged on their current shift by people currently on that shift; other shifts,
+  unassigned people and managers stay hidden, and unassigned staff see only their
+  own (enforced by the activities SELECT policy, so the sidebar and KPI counts follow
+  the same rule). Pick a work day (◀ ▶ / date) and a shift (All / Morning /
+  Afternoon / Night, managers); filter by staff (managers: anyone; staff on a shift:
+  "Whole shift" or one shift-mate), action and driver/company. Each row shows the
+  exact time in Tashkent and US Eastern, shift, staff, driver, action and note,
+  plus per-action counts for the selection.
+- Shifts: shift control panel. Three shift cards, each with its hours (Tashkent,
+  today's shown in the card head with US Eastern) as one "Every day" range or seven
+  weekday ranges ("Different per day" / "Same every day"; +1 marks a next-day end),
+  and a people list with remove buttons and a "+ Add a person…" picker (picking
+  someone from another shift moves them). "On duty now" badge, unassigned list, one
+  Save Schedule / Discard for people and hours together.
 - Statistics: a date range picked on a calendar (up to 31 days, see 16B). Shows
   all-3-shift totals per action, per-shift totals with who did them, a per-staff
   table, and a day-by-day breakdown by shift for multi-day periods.
 
 D. DATABASE CHANGES (supabase_schema.sql, safe to re-run):
-- New columns staff_profiles.shift_code, activities.shift_code, activities.shift_date.
-- Split RLS on companies / drivers: SELECT + UPDATE for members, INSERT + DELETE for
-  managers. Reorders use rpc save_driver_order / save_company_order (updates that run
-  with the caller's permissions) instead of upserts.
-- Tests 14-16 in tests/supabase_accountability.test.js cover these rules.
+- New columns staff_profiles.shift_code, activities.shift_code, activities.shift_date;
+  new table shift_hours with rpc save_shift_hours (see B).
+- Split RLS on companies / drivers: SELECT + UPDATE for members; INSERT on drivers
+  for members too (staff add drivers, policy "Members add drivers"); INSERT on
+  companies and DELETE on both for managers only. Reorders use rpc save_driver_order /
+  save_company_order (updates that run with the caller's permissions) instead of
+  upserts.
+- Activities SELECT policy "Staff read own and shift activities, managers read team"
+  (see C); public.current_shift_code() now sits with the session helpers (step 2).
+- Tests 14-16, 16b (shift hours) and 16c (shift-mate visibility) in
+  tests/supabase_accountability.test.js cover these rules.
 
 --------------------------------------------------------------------------------
 16B. V2 LOOK — "INDUSTRY" DESIGN SYSTEM (supersedes the visual details in 4-13)
@@ -476,8 +504,14 @@ square hairline-bordered objects. The only warm color is the signal
   delete for managers), sign / status selects in the status look from
   statusConfig.js, last-check age with a bar, inline notes. Sheet tabs sit under
   the board (first tab fixed, others draggable). Company rows show a freshness
-  strip and the overdue count. Below 720px tall the KPI cards hide; below 1240px
-  wide the sidebar and columns narrow.
+  strip and the overdue count; hovering one shows + Driver for everyone and edit /
+  delete company for managers ("Add the first driver" on empty companies too).
+- Screen sizes: below 720px tall the KPI cards hide; below 1240px wide the sidebar
+  and columns narrow; below 1100px the KPI cards go two per row; below 900px the
+  sidebar is an icon rail, the board toolbar wraps under the title, the board
+  columns tighten and scroll sideways, and the Logs / Statistics tables keep their
+  column widths and scroll sideways; below 600px the count / total tiles go two
+  per row and the pages use tighter padding. Toasts fit the screen width.
 - Keyboard on the board: ↑ ↓ select, C mark checked, E edit, / search, Esc clears the
   search (and closes menus and dialogs).
 - Freshness levels (utils/freshness.js): fresh < 1h, aging 1-2.5h, warning 2.5-4h,
@@ -486,8 +520,10 @@ square hairline-bordered objects. The only warm color is the signal
 - Confirmations (delete driver / company, reset fleet, deactivate staff) use an
   in-app dialog (ConfirmDialog.vue) instead of the browser's confirm().
 - Logs: day stepper (click the day to pick any date), shift filter and staff filter
-  for managers, search, clickable per-action count tiles.
-- Shifts: the shift on duty is drawn dark; each card shows actions in the last 7 days.
+  for managers (staff on a shift get a shift-mate filter), search, clickable
+  per-action count tiles.
+- Shifts: the shift on duty is drawn dark; each card shows its hours, its people
+  and actions in the last 7 days.
 - Statistics: a calendar range picker (click a start day, then an end day; up to
   31 days, nothing after today); day-by-day stacked columns (at least a
   week shown) in three steel shades for Morning / Afternoon / Night.
@@ -519,13 +555,34 @@ square hairline-bordered objects. The only warm color is the signal
   or anywhere on the board), a second Esc leaves the box.
 - Sidebar: the « button closes it to a 60px icon rail (labels become tooltips, the
   unread badge stays on the bell); » opens it again. Remembered per browser
-  (localStorage "checkingboard_sidebar_collapsed").
+  (localStorage "checkingboard_sidebar_collapsed"). Only the width animates: the
+  contents keep the open width and are clipped, icons sit on the rail's center line
+  and labels fade, so nothing reflows mid-animation. It scrolls without a visible
+  scrollbar in short windows. Below 900px wide it is always the rail; » opens it
+  until you pick a page, without changing the saved preference. The on-duty block
+  shows that shift's hours for the day (custom hours included) and wraps in the
+  narrower sidebar.
 - Database setup: re-run supabase_schema.sql (section 7B adds the tables, policies,
   storage bucket and Realtime). Tests 17-18 cover notifications and extensions.
 
 --------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - FLEXIBLE SHIFTS & ACCESS (re-run supabase_schema.sql):
+- Any number of people per shift (the 2-per-shift limit is gone).
+- Managers set each shift's start / end time, the same every day or per weekday
+  (shift_hours table, rpc save_shift_hours); actions are placed by the team's hours
+  (section 16 B). Fixed: an action at exactly a shift's end time now belongs to the
+  next shift.
+- Staff can add drivers; removing drivers and all company changes stay manager-only.
+- Staff see their shift-mates' actions on their current shift (Logs, sidebar, KPIs).
+- Sidebar: icons no longer vanish when closed, the logo no longer jumps, no
+  scrollbar clipping in short windows, on-duty hours wrap; labels fade instead of
+  reflowing (no flicker).
+- Small screens: icon-rail sidebar under 900px, wrapping toolbars, two-per-row cards,
+  sideways-scrolling tables (section 16B).
+- Tests 14 and 16 updated; new tests 16b and 16c.
+
 OCTOBER 2026 - NOTIFICATIONS & EXTENSIONS:
 - Managers send notifications to everyone / a shift / one person; staff get an
   unread badge, a drawer and live toasts.

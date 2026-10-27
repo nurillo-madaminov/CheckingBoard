@@ -4,7 +4,7 @@
       <div class="title-block">
         <h2 class="cb-title">Logs</h2>
         <span class="cb-sub">
-          {{ isManager ? 'All team actions' : 'Your own actions' }} for the work day (07:00 – 07:00 Tashkent)
+          {{ scopeLabel }} for the work day (shifts that started that day, Tashkent time)
         </span>
       </div>
       <div class="cb-spacer"></div>
@@ -35,9 +35,10 @@
         </button>
       </div>
 
-      <select v-if="isManager" v-model="filters.staffUserId" class="input compact staff-select">
-        <option value="">All staff</option>
-        <option v-for="staff in staffProfiles" :key="staff.id" :value="staff.id">{{ staff.displayName }}</option>
+      <!-- Managers pick anyone; staff on a shift pick among their shift-mates -->
+      <select v-if="staffOptions.length > 1" v-model="filters.staffUserId" class="input compact staff-select">
+        <option value="">{{ isManager ? 'All staff' : 'Whole shift' }}</option>
+        <option v-for="staff in staffOptions" :key="staff.id" :value="staff.id">{{ staff.displayName }}</option>
       </select>
 
       <input v-model="filters.search" class="input compact search" placeholder="Search driver or company" />
@@ -58,8 +59,8 @@
 
     <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
-    <!-- Records -->
-    <div class="cb-panel">
+    <!-- Records (scrolls sideways on narrow screens) -->
+    <div class="cb-panel records">
       <div class="cb-grid-head grid head">
         <div class="center">#</div><div>Time · TAS / ET</div><div>Shift</div><div>Staff</div><div>Driver</div><div>Action</div><div>Note</div>
       </div>
@@ -92,7 +93,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { ACTION_TYPES, getActionTypeConfig, fetchActivities } from '../services/activityService';
-import { isCurrentUserManager, staffProfiles as roster } from '../services/authService';
+import { isCurrentUserManager, currentStaffUser, staffProfiles as roster } from '../services/authService';
 import {
   SHIFTS,
   getShiftConfig,
@@ -113,6 +114,18 @@ const props = defineProps({
 const isManager = computed(() => isCurrentUserManager());
 const staffProfiles = computed(() => roster.value);
 const today = currentWorkDay();
+
+// Staff see their own records plus their shift-mates' on that shift (the database enforces this)
+const myShiftCode = computed(() => currentStaffUser.value?.shiftCode || '');
+const shiftMates = computed(() => (myShiftCode.value
+  ? staffProfiles.value.filter(p => p.shiftCode === myShiftCode.value)
+  : []));
+const staffOptions = computed(() => (isManager.value ? staffProfiles.value : shiftMates.value));
+const scopeLabel = computed(() => {
+  if (isManager.value) return 'All team actions';
+  if (shiftMates.value.length > 1) return `Your and your ${getShiftConfig(myShiftCode.value).label} shift-mates' actions`;
+  return 'Your own actions';
+});
 
 const shiftOptions = [{ code: '', label: 'All' }, ...SHIFTS.map(s => ({ code: s.code, label: s.label }))];
 
@@ -141,7 +154,7 @@ async function load() {
       fromDate: filters.day,
       toDate: filters.day,
       shiftCode: isManager.value ? filters.shift : '',
-      staffUserId: isManager.value ? filters.staffUserId : ''
+      staffUserId: filters.staffUserId
     });
     if (seq === loadSeq) activities.value = rows;
   } catch (err) {
@@ -226,5 +239,20 @@ onMounted(load);
   .counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .count:nth-child(4) { border-left: 0; }
   .count:nth-child(n + 4) { border-top: 1px solid var(--color-divider); }
+}
+@media (max-width: 900px) {
+  .staff-select, .search { flex: 1 1 160px; width: auto; }
+  /* Columns keep a readable width; the table scrolls sideways (the header stops sticking) */
+  .records { overflow-x: auto; }
+  .grid { min-width: 820px; }
+  .head { position: static; }
+}
+@media (max-width: 600px) {
+  .counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .count { padding: 10px 12px; }
+  .count-num { font-size: 24px; }
+  .count:nth-child(n) { border-left: 1px solid var(--color-divider); }
+  .count:nth-child(odd) { border-left: 0; }
+  .count:nth-child(n + 3) { border-top: 1px solid var(--color-divider); }
 }
 </style>

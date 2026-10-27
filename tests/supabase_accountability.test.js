@@ -210,7 +210,7 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.ok(acts.data.some(a => a.staff_user_id === staffA1Id), 'new manager sees team activity');
   });
 
-  test('14. Only managers add, rename or remove companies and add or remove drivers; staff edit drivers and reorder', async () => {
+  test('14. Only managers add, rename or remove companies and remove drivers; staff add and edit drivers and reorder', async () => {
     const john = await mustSignIn(uname('john'), pw);
     const comp2 = `comp-t2-${run}`;
     const drv2 = `drv-t2-${run}`;
@@ -220,8 +220,14 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     let r = await mgrA.from('companies').insert({ id: comp2, name: 'Second Carrier', order_index: 2 });
     assert.equal(r.error, null, r.error?.message);
 
-    const staffDrv = await john.from('drivers').insert({ id: `drv-staff-${run}`, company_id: comp2, name: 'Nope' });
-    assert.ok(staffDrv.error, 'staff cannot add a driver');
+    const staffDrv = await john.from('drivers').insert({ id: `drv-staff-${run}`, company_id: comp2, name: 'Added by staff' }).select();
+    assert.equal(staffDrv.error, null, staffDrv.error?.message);
+    assert.equal(staffDrv.data?.length, 1, 'staff can add a driver');
+    const compB = `comp-b-${run}`;
+    r = await mgrB.from('companies').insert({ id: compB, name: 'Bravo Carrier' });
+    assert.equal(r.error, null, r.error?.message);
+    const foreignDrv = await john.from('drivers').insert({ id: `drv-foreign-${run}`, company_id: compB, name: 'Wrong team' });
+    assert.ok(foreignDrv.error, 'staff cannot add a driver to another team');
     r = await mgrA.from('drivers').insert({ id: drv2, company_id: comp2, unit: '202', name: 'Jane Roe', order_index: 1 });
     assert.equal(r.error, null, r.error?.message);
 
@@ -261,14 +267,14 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(ok.error, null, ok.error?.message);
   });
 
-  test('16. Shift schedule: manager only, 2 per shift, actions credited to the assigned shift', async () => {
+  test('16. Shift schedule: manager only, any number per shift, actions credited to the assigned shift', async () => {
     const john = await mustSignIn(uname('john'), pw);
     const monaId = (await mgrA.auth.getUser()).data.user.id;
 
     const denied = await john.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id] } });
     assert.ok(denied.error, 'staff cannot change the schedule');
-    const tooMany = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id, staffA2Id, monaId] } });
-    assert.match(tooMany.error?.message || '', /at most 2/);
+    const three = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id, staffA2Id, monaId] } });
+    assert.equal(three.error, null, three.error?.message);
     const twice = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id], NIGHT: [staffA1Id] } });
     assert.match(twice.error?.message || '', /only one shift/);
     const foreign = await mgrB.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id] } });
@@ -290,6 +296,72 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(r.error, null, r.error?.message);
     const after = await mgrA.from('staff_profiles').select('shift_code').eq('id', staffA1Id).single();
     assert.equal(after.data.shift_code, null);
+  });
+
+  test('16b. Shift hours: manager sets them per weekday; staff read them; other teams see nothing', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const hours = [
+      { shift_code: 'MORNING', weekday: 1, start_min: 480, end_min: 960 },
+      { shift_code: 'NIGHT', weekday: 6, start_min: 1320, end_min: 360 }
+    ];
+
+    const denied = await john.rpc('save_shift_hours', { p_hours: hours });
+    assert.ok(denied.error, 'staff cannot change shift hours');
+    const same = await mgrA.rpc('save_shift_hours', { p_hours: [{ shift_code: 'MORNING', weekday: 2, start_min: 600, end_min: 600 }] });
+    assert.match(same.error?.message || '', /same time/);
+    const badDay = await mgrA.rpc('save_shift_hours', { p_hours: [{ shift_code: 'MORNING', weekday: 8, start_min: 0, end_min: 60 }] });
+    assert.ok(badDay.error, 'weekday must be 1-7');
+
+    let r = await mgrA.rpc('save_shift_hours', { p_hours: hours });
+    assert.equal(r.error, null, r.error?.message);
+    const seen = await john.from('shift_hours').select('shift_code, weekday, start_min, end_min');
+    assert.equal(seen.data.length, 2, 'staff read their team hours');
+    const direct = await john.from('shift_hours').insert({ team_id: 'x', shift_code: 'MORNING', weekday: 3, start_min: 1, end_min: 2 });
+    assert.ok(direct.error, 'no direct writes');
+    const other = await mgrB.from('shift_hours').select('shift_code');
+    assert.equal(other.data.length, 0, 'other teams see nothing');
+
+    // Saving replaces everything; an empty list goes back to the defaults
+    r = await mgrA.rpc('save_shift_hours', { p_hours: [] });
+    assert.equal(r.error, null, r.error?.message);
+    const cleared = await mgrA.from('shift_hours').select('shift_code');
+    assert.equal(cleared.data.length, 0);
+  });
+
+  test('16c. Shift-mates see each other\'s actions on their shift; other shifts stay private', async () => {
+    let r = await mgrA.rpc('create_staff_account', { p_display_name: 'Staff Kate', p_username: uname('kate'), p_password: pw, p_role: 'staff' });
+    assert.equal(r.error, null, r.error?.message);
+    const kateId = r.data.id;
+    r = await mgrA.rpc('create_staff_account', { p_display_name: 'Staff Leo', p_username: uname('leo'), p_password: pw, p_role: 'staff' });
+    assert.equal(r.error, null, r.error?.message);
+    const leoId = r.data.id;
+    const john = await mustSignIn(uname('john'), pw);
+    const kate = await mustSignIn(uname('kate'), pw);
+    const leo = await mustSignIn(uname('leo'), pw);
+    const sees = async (client, id) => ((await client.from('activities').select('id').eq('id', id)).data || []).length === 1;
+
+    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id, kateId], MORNING: [leoId] } });
+    assert.equal(r.error, null, r.error?.message);
+    const kateAct = (await kate.from('activities').insert({ driver_id: drvA, action_type: 'CYCLE' }).select().single()).data;
+    const leoAct = (await leo.from('activities').insert({ driver_id: drvA, action_type: 'BREAK' }).select().single()).data;
+    assert.equal(kateAct.shift_code, 'NIGHT');
+
+    assert.ok(await sees(john, kateAct.id), 'john sees his night shift-mate');
+    assert.ok(!(await sees(leo, kateAct.id)), 'morning staff do not see the night shift');
+    assert.ok(!(await sees(john, leoAct.id)), 'night staff do not see the morning shift');
+    assert.ok(!(await sees(kate, leoAct.id)));
+
+    // Moving Kate off the night shift takes her records out of John's view; she keeps her own
+    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id], MORNING: [kateId, leoId] } });
+    assert.equal(r.error, null, r.error?.message);
+    assert.ok(!(await sees(john, kateAct.id)), 'no longer a shift-mate');
+    assert.ok(await sees(kate, kateAct.id), 'own records stay visible');
+
+    // Unassigned staff see only their own
+    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id] } });
+    assert.equal(r.error, null, r.error?.message);
+    const leoSees = (await leo.from('activities').select('staff_user_id')).data;
+    assert.ok(leoSees.every(a => a.staff_user_id === leoId), 'unassigned: own records only');
   });
 
   test('17. Notifications: managers send; staff see only what is addressed to them', async () => {

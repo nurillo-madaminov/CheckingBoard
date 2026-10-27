@@ -189,6 +189,7 @@ onUnmounted(() => {
   background: var(--color-neutral-100); border-right: 1px solid var(--color-divider); box-shadow: var(--shadow-lg);
   user-select: text;
 }
+.drawer { transition: left 200ms cubic-bezier(0.2, 0, 0, 1); }
 @media (max-width: 1240px) { .drawer { left: 200px; } }
 .drawer.beside-rail { left: 60px; }
 
