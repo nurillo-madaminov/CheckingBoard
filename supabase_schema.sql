@@ -1179,6 +1179,300 @@ GRANT EXECUTE ON FUNCTION public.clear_office_location() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.cb_distance_m(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) TO authenticated;
 
 -- ------------------------------------------------------------------------------
+-- 7D. ATTENDANCE (phone check-in / check-out) AND PHONE PUSH SUBSCRIPTIONS
+-- ------------------------------------------------------------------------------
+-- Staff check in and out on their phone. The time, shift, distance to the office
+-- and lateness are decided here from the session and the server clock, never by
+-- the phone. Outside the office radius the check-in / check-out is refused.
+-- A check-in more than late_after_min minutes after the shift starts is late.
+
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS late_after_min INTEGER NOT NULL DEFAULT 15;
+ALTER TABLE public.teams DROP CONSTRAINT IF EXISTS teams_late_after_min_check;
+ALTER TABLE public.teams ADD CONSTRAINT teams_late_after_min_check CHECK (late_after_min BETWEEN 0 AND 240);
+
+-- Start / end instants of one run of a shift (work day = the Tashkent date it starts)
+CREATE OR REPLACE FUNCTION public.cb_shift_run(p_team TEXT, p_shift TEXT, p_day DATE)
+RETURNS TABLE (starts TIMESTAMPTZ, ends TIMESTAMPTZ)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT (p_day + make_interval(mins => h.start_min)) AT TIME ZONE 'Asia/Tashkent',
+           (p_day + make_interval(mins => h.end_min)
+                  + CASE WHEN h.end_min <= h.start_min THEN interval '1 day' ELSE interval '0' END) AT TIME ZONE 'Asia/Tashkent'
+    FROM public.cb_shift_hours(p_team, p_shift, p_day) h
+$$;
+
+-- One row per person per shift run. Names are snapshotted like activities.
+CREATE TABLE IF NOT EXISTS public.attendance (
+    id TEXT PRIMARY KEY DEFAULT ('att-' || replace(gen_random_uuid()::text, '-', '')),
+    team_id TEXT NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+    staff_id TEXT REFERENCES public.staff_profiles(id) ON DELETE SET NULL,
+    staff_name_snapshot TEXT NOT NULL DEFAULT '',
+    shift_code TEXT NOT NULL CHECK (shift_code IN ('MORNING', 'AFTERNOON', 'NIGHT')),
+    shift_date DATE NOT NULL,                  -- work day (Tashkent date the run starts)
+    shift_start TIMESTAMPTZ NOT NULL,          -- scheduled run, as it was at check-in
+    shift_end TIMESTAMPTZ NOT NULL,
+    check_in_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    check_in_lat DOUBLE PRECISION NOT NULL,
+    check_in_lng DOUBLE PRECISION NOT NULL,
+    check_in_accuracy_m DOUBLE PRECISION,
+    check_in_distance_m DOUBLE PRECISION NOT NULL,
+    check_out_at TIMESTAMPTZ,
+    check_out_lat DOUBLE PRECISION,
+    check_out_lng DOUBLE PRECISION,
+    check_out_accuracy_m DOUBLE PRECISION,
+    check_out_distance_m DOUBLE PRECISION,
+    late_min INTEGER NOT NULL DEFAULT 0,       -- minutes after the scheduled start (0 = on time or early)
+    late_after_min INTEGER NOT NULL DEFAULT 15, -- the team's rule when they checked in
+    is_late BOOLEAN NOT NULL DEFAULT false,    -- late_min > late_after_min
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (staff_id, shift_date, shift_code)
+);
+CREATE INDEX IF NOT EXISTS attendance_team_date_idx ON public.attendance (team_id, shift_date DESC);
+CREATE INDEX IF NOT EXISTS attendance_open_idx ON public.attendance (staff_id) WHERE check_out_at IS NULL;
+
+ALTER TABLE public.attendance ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Staff read own attendance, managers read team" ON public.attendance;
+CREATE POLICY "Staff read own attendance, managers read team"
+    ON public.attendance FOR SELECT TO authenticated
+    USING (
+        team_id = public.current_team_id()
+        AND (staff_id = auth.uid()::text OR public.is_team_manager())
+    );
+-- No INSERT / UPDATE / DELETE policies: rows are written only by check_in / check_out.
+
+-- Internal: distance from the office, or a clear refusal (no office, bad fix, too far)
+CREATE OR REPLACE FUNCTION public._cb_office_distance(p_team TEXT, p_lat DOUBLE PRECISION, p_lng DOUBLE PRECISION)
+RETURNS DOUBLE PRECISION
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    t RECORD;
+    v_dist DOUBLE PRECISION;
+BEGIN
+    IF p_lat IS NULL OR p_lng IS NULL OR p_lat = 'NaN' OR p_lng = 'NaN'
+       OR p_lat < -90 OR p_lat > 90 OR p_lng < -180 OR p_lng > 180 THEN
+        RAISE EXCEPTION 'Your location could not be read. Turn on location and try again.';
+    END IF;
+    SELECT office_name, office_lat, office_lng, office_radius_m INTO t FROM public.teams WHERE id = p_team;
+    IF t.office_lat IS NULL THEN
+        RAISE EXCEPTION 'Your manager has not set the office location yet.';
+    END IF;
+    v_dist := public.cb_distance_m(p_lat, p_lng, t.office_lat, t.office_lng);
+    IF v_dist > t.office_radius_m THEN
+        RAISE EXCEPTION 'You are % m from %. You need to be within % m.',
+            round(v_dist)::int, coalesce(nullif(t.office_name, ''), 'the office'), t.office_radius_m;
+    END IF;
+    RETURN v_dist;
+END;
+$$;
+
+-- Internal: the caller's open check-in (no check-out yet, shift not long over)
+CREATE OR REPLACE FUNCTION public._cb_open_attendance(p_staff TEXT)
+RETURNS public.attendance
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT * FROM public.attendance
+    WHERE staff_id = p_staff AND check_out_at IS NULL AND shift_end + interval '8 hours' > NOW()
+    ORDER BY check_in_at DESC
+    LIMIT 1
+$$;
+
+CREATE OR REPLACE FUNCTION public.check_in(p_lat DOUBLE PRECISION, p_lng DOUBLE PRECISION, p_accuracy_m DOUBLE PRECISION DEFAULT NULL)
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    me RECORD;
+    v_now TIMESTAMPTZ := NOW();
+    v_code TEXT;
+    v_day DATE;
+    v_starts TIMESTAMPTZ;
+    v_ends TIMESTAMPTZ;
+    v_dist DOUBLE PRECISION;
+    v_late INT;
+    v_grace INT;
+    v_row public.attendance;
+BEGIN
+    SELECT id, display_name, team_id, shift_code INTO me
+    FROM public.staff_profiles WHERE id = auth.uid()::text AND is_active;
+    IF me.id IS NULL THEN
+        RAISE EXCEPTION 'Your account is not active in any team' USING ERRCODE = '42501';
+    END IF;
+    IF me.shift_code IS NULL THEN
+        RAISE EXCEPTION 'You are not on a shift yet. Ask your manager to add you to one.';
+    END IF;
+    IF (public._cb_open_attendance(me.id)).id IS NOT NULL THEN
+        RAISE EXCEPTION 'You are already checked in. Check out first.';
+    END IF;
+
+    -- The run of your shift this belongs to (same rule as activities), and its hours
+    SELECT s.shift_code, s.shift_date INTO v_code, v_day FROM public.cb_shift_of(v_now, me.shift_code, me.team_id) s;
+    SELECT r.starts, r.ends INTO v_starts, v_ends FROM public.cb_shift_run(me.team_id, v_code, v_day) r;
+    IF v_now < v_starts - interval '2 hours' THEN
+        RAISE EXCEPTION 'Your shift starts at % (Tashkent). You can check in from %.',
+            to_char(v_starts AT TIME ZONE 'Asia/Tashkent', 'HH24:MI'),
+            to_char((v_starts - interval '2 hours') AT TIME ZONE 'Asia/Tashkent', 'HH24:MI');
+    END IF;
+    IF v_now >= v_ends THEN
+        RAISE EXCEPTION 'Your shift ended at % (Tashkent).', to_char(v_ends AT TIME ZONE 'Asia/Tashkent', 'HH24:MI');
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.attendance WHERE staff_id = me.id AND shift_date = v_day AND shift_code = v_code) THEN
+        RAISE EXCEPTION 'You already checked in and out of this shift.';
+    END IF;
+
+    v_dist := public._cb_office_distance(me.team_id, p_lat, p_lng);
+    SELECT late_after_min INTO v_grace FROM public.teams WHERE id = me.team_id;
+    v_late := greatest(0, floor(extract(epoch FROM (v_now - v_starts)) / 60))::int;
+
+    INSERT INTO public.attendance (
+        team_id, staff_id, staff_name_snapshot, shift_code, shift_date, shift_start, shift_end,
+        check_in_at, check_in_lat, check_in_lng, check_in_accuracy_m, check_in_distance_m,
+        late_min, late_after_min, is_late
+    ) VALUES (
+        me.team_id, me.id, me.display_name, v_code, v_day, v_starts, v_ends,
+        v_now, p_lat, p_lng, p_accuracy_m, v_dist,
+        v_late, v_grace, v_late > v_grace
+    )
+    RETURNING * INTO v_row;
+    RETURN row_to_json(v_row);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.check_out(p_lat DOUBLE PRECISION, p_lng DOUBLE PRECISION, p_accuracy_m DOUBLE PRECISION DEFAULT NULL)
+RETURNS JSON
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    me RECORD;
+    v_open public.attendance;
+    v_dist DOUBLE PRECISION;
+    v_row public.attendance;
+BEGIN
+    SELECT id, team_id INTO me FROM public.staff_profiles WHERE id = auth.uid()::text AND is_active;
+    IF me.id IS NULL THEN
+        RAISE EXCEPTION 'Your account is not active in any team' USING ERRCODE = '42501';
+    END IF;
+    v_open := public._cb_open_attendance(me.id);
+    IF v_open.id IS NULL THEN
+        RAISE EXCEPTION 'You are not checked in.';
+    END IF;
+    v_dist := public._cb_office_distance(me.team_id, p_lat, p_lng);
+
+    UPDATE public.attendance
+    SET check_out_at = NOW(),
+        check_out_lat = p_lat,
+        check_out_lng = p_lng,
+        check_out_accuracy_m = p_accuracy_m,
+        check_out_distance_m = v_dist
+    WHERE id = v_open.id AND check_out_at IS NULL
+    RETURNING * INTO v_row;
+    RETURN row_to_json(v_row);
+END;
+$$;
+
+-- Manager sets how many minutes after the shift start a check-in counts as late
+CREATE OR REPLACE FUNCTION public.set_attendance_rules(p_late_after_min INTEGER)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can change the attendance rules' USING ERRCODE = '42501';
+    END IF;
+    IF p_late_after_min IS NULL OR p_late_after_min < 0 OR p_late_after_min > 240 THEN
+        RAISE EXCEPTION 'Late after must be between 0 and 240 minutes';
+    END IF;
+    UPDATE public.teams SET late_after_min = p_late_after_min, updated_at = NOW()
+    WHERE id = public.current_team_id();
+END;
+$$;
+
+-- Phones that receive push alerts. One row per browser subscription; the
+-- send-push Edge Function reads it with the service role.
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    staff_id TEXT NOT NULL REFERENCES public.staff_profiles(id) ON DELETE CASCADE,
+    team_id TEXT NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_team_idx ON public.push_subscriptions (team_id, staff_id);
+ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Members read their own push subscriptions" ON public.push_subscriptions;
+CREATE POLICY "Members read their own push subscriptions"
+    ON public.push_subscriptions FOR SELECT TO authenticated
+    USING (staff_id = auth.uid()::text);
+
+-- Save this browser for the signed-in member (a shared phone moves to whoever signs in)
+CREATE OR REPLACE FUNCTION public.save_push_subscription(p_endpoint TEXT, p_p256dh TEXT, p_auth TEXT, p_user_agent TEXT DEFAULT '')
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    me RECORD;
+BEGIN
+    SELECT id, team_id INTO me FROM public.staff_profiles WHERE id = auth.uid()::text AND is_active;
+    IF me.id IS NULL THEN
+        RAISE EXCEPTION 'Your account is not active in any team' USING ERRCODE = '42501';
+    END IF;
+    IF coalesce(p_endpoint, '') !~ '^https://' OR coalesce(p_p256dh, '') = '' OR coalesce(p_auth, '') = '' THEN
+        RAISE EXCEPTION 'Invalid push subscription';
+    END IF;
+    INSERT INTO public.push_subscriptions (endpoint, staff_id, team_id, p256dh, auth, user_agent)
+    VALUES (p_endpoint, me.id, me.team_id, p_p256dh, p_auth, left(coalesce(p_user_agent, ''), 300))
+    ON CONFLICT (endpoint) DO UPDATE
+    SET staff_id = EXCLUDED.staff_id, team_id = EXCLUDED.team_id, p256dh = EXCLUDED.p256dh,
+        auth = EXCLUDED.auth, user_agent = EXCLUDED.user_agent, created_at = NOW();
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_push_subscription(p_endpoint TEXT)
+RETURNS VOID
+LANGUAGE sql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    DELETE FROM public.push_subscriptions WHERE endpoint = p_endpoint AND staff_id = auth.uid()::text
+$$;
+
+REVOKE ALL ON public.attendance, public.push_subscriptions FROM anon;
+GRANT SELECT ON public.attendance, public.push_subscriptions TO authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.attendance, public.push_subscriptions FROM authenticated;
+REVOKE ALL ON FUNCTION public.cb_shift_run(TEXT, TEXT, DATE) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._cb_office_distance(TEXT, DOUBLE PRECISION, DOUBLE PRECISION) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._cb_open_attendance(TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.check_in(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.check_out(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.set_attendance_rules(INTEGER) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.save_push_subscription(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.delete_push_subscription(TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.check_in(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.check_out(DOUBLE PRECISION, DOUBLE PRECISION, DOUBLE PRECISION) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.set_attendance_rules(INTEGER) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.save_push_subscription(TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_push_subscription(TEXT) TO authenticated;
+
+-- Managers see check-ins arrive live
+ALTER TABLE public.attendance REPLICA IDENTITY FULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'attendance'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.attendance;
+    END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
 -- 8. CLAIM THE LEGACY FLEET (run by you in the SQL editor, never from the app)
 -- ------------------------------------------------------------------------------
 -- Moves every company, driver and activity that still belongs to the unclaimed
