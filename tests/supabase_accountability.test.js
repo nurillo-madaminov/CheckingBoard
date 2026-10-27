@@ -412,4 +412,92 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     const del = await john.from('extensions').delete().eq('id', data.id).select();
     assert.equal(del.data?.length || 0, 0, 'staff cannot remove');
   });
+
+  const OFFICE_COLS = 'office_name, office_lat, office_lng, office_radius_m, office_updated_at, office_updated_by';
+  const office = { p_name: 'Tashkent office', p_lat: 41.311081, p_lng: 69.240562, p_radius_m: 150 };
+
+  test('19. Office location: a manager sets and clears it; who and when come from the session', async () => {
+    const monaId = (await mgrA.auth.getUser()).data.user.id;
+    let r = await mgrA.rpc('set_office_location', office);
+    assert.equal(r.error, null, r.error?.message);
+    const { data: t } = await mgrA.from('teams').select(OFFICE_COLS).single();
+    assert.equal(t.office_name, 'Tashkent office');
+    assert.equal(t.office_lat, 41.311081);
+    assert.equal(t.office_lng, 69.240562);
+    assert.equal(t.office_radius_m, 150);
+    assert.equal(t.office_updated_by, monaId, 'stamped with the caller');
+    assert.ok(Math.abs(Date.parse(t.office_updated_at) - Date.now()) < 5 * 60e3, 'stamped with the server time');
+
+    r = await mgrA.rpc('clear_office_location');
+    assert.equal(r.error, null, r.error?.message);
+    const { data: cleared } = await mgrA.from('teams').select(OFFICE_COLS).single();
+    assert.ok(Object.values(cleared).every(v => v === null), 'every office column back to null');
+  });
+
+  test('20. Office location: staff are rejected; managers cannot touch another team\'s office', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    let r = await mgrA.rpc('set_office_location', office);
+    assert.equal(r.error, null, r.error?.message);
+
+    const denied = await john.rpc('set_office_location', { ...office, p_name: 'Staff office' });
+    assert.match(denied.error?.message || '', /Only managers/);
+    const deniedClear = await john.rpc('clear_office_location');
+    assert.match(deniedClear.error?.message || '', /Only managers/);
+    const direct = await mgrA.from('teams').update({ office_radius_m: 999 }).not('id', 'is', null).select();
+    assert.ok(direct.error || (direct.data?.length || 0) === 0, 'no direct writes to teams, even for managers');
+
+    // Team B's manager only ever changes team B
+    r = await mgrB.rpc('set_office_location', { p_name: 'Bravo office', p_lat: 40.0, p_lng: 70.0, p_radius_m: 300 });
+    assert.equal(r.error, null, r.error?.message);
+    r = await mgrB.rpc('clear_office_location');
+    assert.equal(r.error, null, r.error?.message);
+    const { data: a } = await mgrA.from('teams').select(OFFICE_COLS).single();
+    assert.equal(a.office_name, 'Tashkent office', 'team A untouched by team B');
+    assert.equal(a.office_radius_m, 150);
+    const peek = await mgrB.from('teams').select('office_name').eq('office_name', 'Tashkent office');
+    assert.equal(peek.data.length, 0, 'team B cannot read team A');
+  });
+
+  test('21. Office location: invalid or partial values are rejected', async () => {
+    const bad = [
+      [{ ...office, p_lat: 90.5 }, /Latitude/],
+      [{ ...office, p_lat: -91 }, /Latitude/],
+      [{ ...office, p_lng: 180.1 }, /Longitude/],
+      [{ ...office, p_lng: -200 }, /Longitude/],
+      [{ ...office, p_radius_m: 29 }, /Radius/],
+      [{ ...office, p_radius_m: 1001 }, /Radius/],
+      [{ ...office, p_name: '   ' }, /name is required/],
+      [{ ...office, p_lng: null }, /all required/],
+      [{ ...office, p_lat: null, p_lng: null }, /all required/],
+      [{ ...office, p_radius_m: null }, /all required/]
+    ];
+    for (const [args, message] of bad) {
+      const r = await mgrA.rpc('set_office_location', args);
+      assert.match(r.error?.message || '', message, JSON.stringify(args));
+    }
+    const { data } = await mgrA.from('teams').select(OFFICE_COLS).single();
+    assert.equal(data.office_radius_m, 150, 'rejected calls change nothing');
+  });
+
+  test('22. cb_distance_m: 0 for the same point, about 111.2 km per degree of latitude', async () => {
+    const dist = async (lat1, lng1, lat2, lng2) => {
+      const r = await mgrA.rpc('cb_distance_m', { lat1, lng1, lat2, lng2 });
+      assert.equal(r.error, null, r.error?.message);
+      return r.data;
+    };
+    assert.ok(Math.abs(await dist(41.311081, 69.240562, 41.311081, 69.240562)) < 0.001);
+    const degree = await dist(41, 69, 42, 69);
+    assert.ok(Math.abs(degree - 111195) < 200, `1 degree of latitude = ${degree} m`);
+    const nearby = await dist(41.311081, 69.240562, 41.315081, 69.240562);
+    assert.ok(Math.abs(nearby - 444.8) < 2, `0.004 degrees of latitude = ${nearby} m`);
+  });
+
+  test('23. Staff read their own team\'s office settings', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const { data, error } = await john.from('teams').select(OFFICE_COLS).single();
+    assert.equal(error, null, error?.message);
+    assert.equal(data.office_name, 'Tashkent office');
+    assert.equal(data.office_radius_m, 150);
+    assert.equal(typeof data.office_lat, 'number');
+  });
 });
