@@ -387,4 +387,10 @@ onUnmounted(() => clearInterval(clockTimer));
 
 @media (max-width: 1400px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+/* Phones: give the time boxes the room (12-hour clocks show AM / PM too) */
+@media (max-width: 640px) {
+  .hours-row { grid-template-columns: 56px minmax(0, 1fr) auto minmax(0, 1fr) 16px; gap: 4px; }
+  .day-label { font-size: 12px; }
+  .time { font-size: 13px; padding-inline: 4px; }
+}
 </style>

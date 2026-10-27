@@ -622,8 +622,98 @@ C. TESTS (tests/supabase_accountability.test.js):
 D. SETUP: re-run supabase_schema.sql in the Supabase SQL Editor before using it.
 
 --------------------------------------------------------------------------------
+16E. PHONE APP (PWA): CHECK-IN / CHECK-OUT, ATTENDANCE, PUSH ALERTS
+--------------------------------------------------------------------------------
+A. INSTALLABLE APP:
+- public/manifest.webmanifest (name, standalone display, steel theme #1d2d3d,
+  icons in public/icons: 192, 512, maskable 512, apple-touch 180, badge 96, drawn
+  with Bahnschrift SemiBold Condensed), public/sw.js (service worker: network-first
+  page with the last copy for weak connections, cache-first hashed /assets/, push
+  alerts, tapping an alert opens Notifications). Registered in src/main.js.
+- Android / Chrome: "Install app". iPhone: Safari -> Share -> Add to Home Screen.
+
+B. PHONE LAYOUT (App.vue): any phone-sized screen (max 640px wide, or a short touch
+   screen in landscape), in the browser or installed, gets only the phone features;
+   PCs and tablets keep the full app. Steel top bar (team, name, live dot, sign
+   out) and a bottom tab bar (safe-area aware):
+- Staff: Check in · Alerts · Team.
+- Managers: Shifts · Logs · Stats · Attendance · Alerts (send notifications).
+  The board, extensions and the rest stay PC-only. Check-in is phone-only.
+
+C. CHECK-IN / CHECK-OUT (CheckInView.vue, services/attendanceService.js):
+- Live Tashkent clock (+ US Eastern), today's shift run with time left and the
+  "late after" time, one big Check in / Check out button, the result (distance to
+  the office, on time / late, or why it was refused) and the last shifts.
+- The phone's GPS is read only when the button is tapped. The database decides the
+  time (server clock), the shift run (cb_shift_of with the staff member's assigned
+  shift, same rule as activities), the distance to the office (cb_distance_m) and
+  lateness. Refused when: outside the office radius ("You are 480 m from Tashkent
+  office. You need to be within 150 m."), no office set, not on a shift, more than
+  2 hours before the shift starts, after it ended, already checked in, or this shift
+  already checked in and out. A check-in with no check-out closes itself out of the
+  way 8 hours after its shift ends (it then shows as "No check-out").
+- Late = checked in more than teams.late_after_min (default 15, 0-240, set by
+  managers) minutes after the scheduled start. Leaving early is not flagged.
+
+D. ATTENDANCE (AttendanceView.vue; PC sidebar + phone tab, managers only):
+- Month stepper, person filter, "Late after N min" setting. Per-person month
+  summary (shifts, late count, late total, missing check-outs) and every check-in
+  (day, person, shift + scheduled hours, in / out in Tashkent + ET, late, distance).
+  Late rows are highlighted in the signal color; on phones rows become cards.
+  New check-ins arrive live (Realtime on attendance, on its own channel).
+
+E. TEAM (TeamView.vue, staff): your shift and today's hours, your shift-mates and
+   the managers.
+
+F. PUSH ALERTS (services/pushService.js, PushAlertsToggle.vue,
+   supabase/functions/send-push):
+- "Phone alerts" on the Notifications page: Turn on asks the browser for permission
+  (only on tap) and saves the subscription (rpc save_push_subscription). iPhone
+  needs the app added to the Home Screen first (iOS 16.4+).
+- After a manager sends a notification, the app calls the send-push Edge Function.
+  It checks the caller is an active manager of that team, sends to the active
+  members the notification is addressed to (everyone / a shift / one person, never
+  the sender) with Web Push (VAPID), and deletes subscriptions that are gone. The
+  notification is saved even if push fails; the panel says how many phones got it.
+- A phone follows whoever is signed in: sign-in re-saves an allowed subscription,
+  sign-out removes it from the database.
+
+G. DATABASE (supabase_schema.sql section 7D, safe to re-run):
+- teams.late_after_min; table attendance (team, staff + name snapshot, shift_code,
+  shift_date, scheduled shift_start / shift_end, check-in / check-out time, lat,
+  lng, GPS accuracy, distance, late_min, late_after_min, is_late; one row per person
+  per shift run); table push_subscriptions (endpoint, staff, team, keys).
+- rpc check_in / check_out / set_attendance_rules / save_push_subscription /
+  delete_push_subscription; internal cb_shift_run, _cb_office_distance,
+  _cb_open_attendance.
+- RLS: staff read their own attendance, managers the team; members read only their
+  own push subscriptions; no direct writes to either table.
+
+H. SETUP (once, see README "Phone app"):
+1. Re-run supabase_schema.sql.
+2. Push keys: VITE_VAPID_PUBLIC_KEY in .env and on the hosting platform (rebuild);
+   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT as Supabase secrets
+   (supabase/.env.push, never committed).
+3. Deploy the function: npx supabase functions deploy send-push.
+Without 2-3 everything works except phone alerts (the toggle hides when no public
+key is configured).
+
+I. TESTS: 24 (late rule), 25 (check-in / out: radius, server time, lateness,
+   double check-in), 26 (on time vs late, unassigned refused, visibility, no direct
+   writes), 27 (push subscriptions).
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - PHONE APP, CHECK-IN & PUSH ALERTS (re-run supabase_schema.sql):
+- CheckingBoard installs as a phone app (PWA). Phones get a phone layout: staff
+  check in / out, read notifications and see their team; managers get shifts,
+  logs, statistics, attendance and notifications (section 16E).
+- Check-in / check-out by GPS, refused outside the office radius; lateness from the
+  manager's "late after" rule; managers review attendance by month (PC and phone).
+- Real push notifications to phones through the send-push Edge Function.
+- Tests 24-27.
+
 OCTOBER 2026 - OFFICE LOCATION SETTING:
 - Managers pin the team's office on a map (Leaflet + OpenStreetMap) and set the
   allowed check-in radius (30-1000 m) on the Shifts page (section 16D).

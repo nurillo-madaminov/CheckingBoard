@@ -168,6 +168,7 @@ export async function runDailySignReset() {
 
 // ---------- realtime ----------
 let activeChannel = null;
+let attendanceChannel = null;
 
 export function broadcastFleetReset() {
   if (!activeChannel) return;
@@ -182,7 +183,7 @@ export function broadcastFleetReset() {
  * Live sync between dispatchers of the same team. postgres_changes events are
  * already limited by RLS; the team check below is an extra guard.
  */
-export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChange, onFleetReset, onStatus, onActivityInsert, onNotificationChange }) {
+export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChange, onFleetReset, onStatus, onActivityInsert, onNotificationChange, onAttendanceChange }) {
   if (!supabase || !teamId) return null;
   unsubscribeFromRealtime();
 
@@ -213,15 +214,29 @@ export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChang
       if (onStatus) onStatus(status);
     });
 
+  // Phone check-ins / check-outs on their own channel: if the attendance table is
+  // missing (database script not re-run yet), only this channel fails, not the board
+  if (onAttendanceChange) {
+    attendanceChannel = supabase
+      .channel(`checkingboard-attendance-${teamId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, payload => {
+        if (isOwnTeam(payload)) onAttendanceChange(payload);
+      })
+      .subscribe();
+  }
+
   return activeChannel;
 }
 
 export function unsubscribeFromRealtime() {
-  if (!activeChannel) return;
-  try {
-    supabase.removeChannel(activeChannel);
-  } catch (e) {
-    console.warn('Realtime unsubscribe error:', e);
+  for (const channel of [activeChannel, attendanceChannel]) {
+    if (!channel) continue;
+    try {
+      supabase.removeChannel(channel);
+    } catch (e) {
+      console.warn('Realtime unsubscribe error:', e);
+    }
   }
   activeChannel = null;
+  attendanceChannel = null;
 }

@@ -12,6 +12,9 @@ dist-ssr/
 # Environment files
 .env
 .env.*.local
+# Supabase CLI: Edge Function secrets (push keys) and local state
+supabase/.env*
+supabase/.temp/
 
 # Editor & OS files
 .vscode/

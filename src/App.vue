@@ -15,6 +15,68 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <!-- NOT SIGNED IN: SIGN IN / CREATE A TEAM -->
   <LoginView v-else-if="!currentUser" />
 
+  <!-- SIGNED IN ON A PHONE: only the phone features, tabs at the bottom -->
+  <div v-else-if="isPhone" class="phone">
+    <header class="phone-top">
+      <span class="phone-mark">CB</span>
+      <div class="phone-title">
+        <span class="phone-team cb-ellipsis">{{ currentTeam?.name || 'CheckingBoard' }}</span>
+        <span class="phone-user cb-ellipsis">{{ currentUser.displayName }} · {{ currentUser.role }}</span>
+      </div>
+      <span :class="['live-dot', { 'is-live': isLive }]" :title="isLive ? 'Live' : 'Connecting…'"></span>
+      <button class="phone-signout" title="Sign out" aria-label="Sign out" @click="handleLogout">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></svg>
+      </button>
+    </header>
+
+    <main class="phone-main">
+      <div v-if="phoneTab === 'checkin'" class="cb-page cb-scroll"><CheckInView :refreshKey="attendanceVersion" /></div>
+      <div v-else-if="phoneTab === 'team'" class="cb-page cb-scroll"><TeamView /></div>
+      <div v-else-if="phoneTab === 'notifications'" class="cb-page cb-scroll">
+        <NotificationsPanel
+          asPage
+          :notifications="notifications"
+          :unreadIds="unreadIdsAtOpen"
+          :isManager="isManager"
+          :roster="staffProfiles"
+          @changed="loadNotifications"
+          @sent="showToast({ title: 'Notification sent', message: $event })"
+        />
+      </div>
+      <ShiftControlView
+        v-else-if="phoneTab === 'shifts' && isManager"
+        :refreshKey="activityVersion"
+        @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
+        @office-saved="showToast($event)"
+        @office-error="showErrorToast($event.title, $event.message)"
+      />
+      <ActivityLogView v-else-if="phoneTab === 'logs' && isManager" :activeDrivers="drivers" :refreshKey="activityVersion" />
+      <DailyStatisticsView v-else-if="phoneTab === 'stats' && isManager" :refreshKey="activityVersion" />
+      <AttendanceView
+        v-else-if="phoneTab === 'attendance' && isManager"
+        :refreshKey="attendanceVersion"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
+      />
+    </main>
+
+    <nav class="phone-tabs" aria-label="Sections">
+      <button
+        v-for="t in phoneTabs"
+        :key="t.id"
+        :class="['phone-tab', { 'is-on': phoneTab === t.id }]"
+        :aria-current="phoneTab === t.id ? 'page' : null"
+        @click="phoneTab = t.id"
+      >
+        <span class="phone-tab-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" v-html="t.icon"></svg>
+          <span v-if="t.id === 'notifications' && unreadCount" class="phone-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </span>
+        <span class="phone-tab-label">{{ t.label }}</span>
+      </button>
+    </nav>
+  </div>
+
   <!-- SIGNED IN: SIDEBAR + CURRENT VIEW -->
   <div v-else class="shell">
     <SideNav
@@ -99,7 +161,15 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         :refreshKey="activityVersion"
       />
 
-      <!-- 5. EXTENSIONS (everyone downloads, managers publish) -->
+      <!-- 5. ATTENDANCE (manager): phone check-ins, late highlighted -->
+      <AttendanceView
+        v-else-if="activeView === 'attendance' && isManager"
+        :refreshKey="attendanceVersion"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
+      />
+
+      <!-- 6. EXTENSIONS (everyone downloads, managers publish) -->
       <ExtensionsView
         v-else-if="activeView === 'extensions'"
         :isManager="isManager"
@@ -143,31 +213,31 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       @confirm="runConfirm"
       @cancel="confirmState = null"
     />
+  </div>
 
-    <!-- Toasts (top right; click to dismiss) -->
-    <div class="toasts">
-      <transition-group name="toast">
-        <div
-          v-for="toast in toasts"
-          :key="toast.id"
-          :class="['toast', { 'is-error': toast.isError }]"
-          title="Click to dismiss"
-          @click="removeToast(toast.id)"
-        >
-          <span class="toast-mark" :style="{ background: toast.markColor }"></span>
-          <div class="toast-body">
-            <div class="toast-top">
-              <span class="toast-title cb-ellipsis">{{ toast.title }}</span>
-              <span class="toast-time">{{ toast.time }}</span>
-            </div>
-            <div class="toast-line">
-              <span class="cb-ellipsis">{{ toast.message }}</span>
-              <span v-if="toast.destTab" class="tag tag-outline toast-dest">{{ toast.destTab }}</span>
-            </div>
+  <!-- Toasts (top right; click to dismiss) - shared by the desktop and phone layouts -->
+  <div v-if="currentUser" class="toasts">
+    <transition-group name="toast">
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        :class="['toast', { 'is-error': toast.isError }]"
+        title="Click to dismiss"
+        @click="removeToast(toast.id)"
+      >
+        <span class="toast-mark" :style="{ background: toast.markColor }"></span>
+        <div class="toast-body">
+          <div class="toast-top">
+            <span class="toast-title cb-ellipsis">{{ toast.title }}</span>
+            <span class="toast-time">{{ toast.time }}</span>
+          </div>
+          <div class="toast-line">
+            <span class="cb-ellipsis">{{ toast.message }}</span>
+            <span v-if="toast.destTab" class="tag tag-outline toast-dest">{{ toast.destTab }}</span>
           </div>
         </div>
-      </transition-group>
-    </div>
+      </div>
+    </transition-group>
   </div>
 </template>
 
@@ -185,6 +255,10 @@ import DailyStatisticsView from './components/DailyStatisticsView.vue';
 import ExtensionsView from './components/ExtensionsView.vue';
 import NotificationsPanel from './components/NotificationsPanel.vue';
 import LoginView from './components/LoginView.vue';
+import CheckInView from './components/CheckInView.vue';
+import TeamView from './components/TeamView.vue';
+import AttendanceView from './components/AttendanceView.vue';
+import { syncPushSubscription, forgetThisDevice } from './services/pushService';
 
 import { BOTTOM_TABS, getStatusConfig, getStatusTab } from './config/statusConfig';
 import { currentWorkDay, clockTashkent } from './config/shifts';
@@ -212,8 +286,9 @@ const authLoading = ref(isSupabaseConfigured);
 const companies = ref([]);
 const drivers = ref([]);
 const activityVersion = ref(0); // bumped when new actions arrive so open log views reload
+const attendanceVersion = ref(0); // bumped when a check-in / check-out arrives live
 const activeTabId = ref('CHECKING_BOARD');
-const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'statistics'
+const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'statistics' | 'attendance' | 'extensions'
 const searchQuery = ref('');
 const selectedDriverId = ref('');
 const showStaffModal = ref(false);
@@ -253,6 +328,57 @@ function toggleSidebar() {
   if (isNarrow.value) narrowOpen.value = !narrowOpen.value;
   else sidebarCollapsed.value = !sidebarCollapsed.value;
 }
+
+// ---------------------------------------------------------------------------
+// Phone layout (installed app or phone browser): only the phone features
+// ---------------------------------------------------------------------------
+// A phone-sized screen, or a phone turned sideways (short and touch)
+const phoneQuery = window.matchMedia('(max-width: 640px), (pointer: coarse) and (max-height: 500px)');
+const isPhone = ref(phoneQuery.matches);
+function onPhoneChange(e) {
+  isPhone.value = e.matches;
+}
+phoneQuery.addEventListener('change', onPhoneChange);
+
+const ICONS = {
+  checkin: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" />',
+  notifications: '<path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />',
+  team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />',
+  shifts: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h5" /><path d="M17.5 17.5 16 16.3V14" /><circle cx="16" cy="16" r="6" />',
+  logs: '<path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />',
+  stats: '<path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />',
+  attendance: '<rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /><path d="m9 16 2 2 4-4" />'
+};
+
+// Staff: check in, notifications, team. Managers: shifts, logs, statistics, attendance, notifications.
+const phoneTabs = computed(() => (isManager.value
+  ? [
+      { id: 'shifts', label: 'Shifts' },
+      { id: 'logs', label: 'Logs' },
+      { id: 'stats', label: 'Stats' },
+      { id: 'attendance', label: 'Attendance' },
+      { id: 'notifications', label: 'Alerts' }
+    ]
+  : [
+      { id: 'checkin', label: 'Check in' },
+      { id: 'notifications', label: 'Alerts' },
+      { id: 'team', label: 'Team' }
+    ]).map(t => ({ ...t, icon: ICONS[t.id] })));
+const phoneTab = ref('checkin');
+
+function resetPhoneTab() {
+  phoneTab.value = phoneTabs.value[0].id;
+}
+
+// From a tapped phone alert (service worker message) or a ?view=notifications link
+function openNotifications() {
+  if (isPhone.value) phoneTab.value = 'notifications';
+  else showNotifications.value = true;
+}
+function onServiceWorkerMessage(e) {
+  if (e.data?.type === 'open-notifications' && currentUser.value) openNotifications();
+}
+navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
 
 function navigateTo(view) {
   activeView.value = view;
@@ -338,6 +464,7 @@ function setupRealtime() {
     },
     onActivityInsert: onActivityLogged,
     onNotificationChange,
+    onAttendanceChange: () => { attendanceVersion.value += 1; },
     onFleetReset: async () => {
       drivers.value = sortDrivers(await db.fetchDrivers());
       showToast({
@@ -410,6 +537,17 @@ let restoringSession = true;
 watch(() => currentUser.value?.id, async (id, oldId) => {
   if (!id || id === oldId) return;
   activeView.value = 'fleet';
+  resetPhoneTab();
+  // Opened from a phone alert: go straight to the notifications
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('view') === 'notifications') {
+    openNotifications();
+    params.delete('view');
+    const rest = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+  }
+  // A phone that already allows alerts now delivers them to whoever signed in
+  syncPushSubscription();
   await enterTeam();
   if (!restoringSession) {
     showToast({
@@ -439,6 +577,8 @@ onUnmounted(() => {
   leaveTeam();
   authSubscription?.unsubscribe();
   narrowQuery.removeEventListener('change', onNarrowChange);
+  phoneQuery.removeEventListener('change', onPhoneChange);
+  navigator.serviceWorker?.removeEventListener('message', onServiceWorkerMessage);
 });
 
 // ---------------------------------------------------------------------------
@@ -454,6 +594,8 @@ function handleStaffUserChanged(updatedUser) {
 }
 
 async function handleLogout() {
+  // Stop sending this person's alerts to this device (while still signed in)
+  await forgetThisDevice();
   leaveTeam();
   await logoutUser();
 }
@@ -607,7 +749,10 @@ async function loadNotifications() {
   }
 }
 
-watch(showNotifications, async (open) => {
+// The drawer on a PC, the Alerts tab on a phone
+const notificationsOpen = computed(() => (isPhone.value ? phoneTab.value === 'notifications' : showNotifications.value));
+
+watch(notificationsOpen, async (open) => {
   if (!open) return;
   const unread = incomingNotifications.value.filter(n => !readIds.value.has(n.id)).map(n => n.id);
   unreadIdsAtOpen.value = new Set(unread);
@@ -922,4 +1067,58 @@ function handleResetData() {
 .toast-dest { font-family: var(--font-heading); font-size: 11px; }
 .toast-enter-active, .toast-leave-active { transition: opacity 150ms, transform 150ms; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* Phone layout: steel top bar, one scrolling page, tab bar at the bottom.
+   Safe-area insets keep it clear of the notch and the home indicator. */
+.phone {
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--color-surface); -webkit-tap-highlight-color: transparent;
+}
+.phone-top {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px) 10px calc(env(safe-area-inset-left) + 12px);
+  background: var(--color-accent-900); color: var(--color-bg);
+}
+.phone-mark {
+  width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--color-accent); font-family: var(--font-heading); font-weight: 600; font-size: 13px;
+}
+.phone-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.phone-team { font-family: var(--font-heading); font-weight: 600; font-size: 17px; }
+.phone-user { font-size: 12px; color: var(--color-accent-300); text-transform: capitalize; }
+.live-dot { width: 7px; height: 7px; flex-shrink: 0; background: var(--color-neutral-600); }
+.live-dot.is-live { background: var(--color-accent-400); }
+.phone-signout {
+  width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--color-accent-300); cursor: pointer;
+}
+.phone-signout:active { background: var(--color-accent-800); color: var(--color-bg); }
+
+.phone-main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.phone-main > .cb-page { padding-bottom: 20px; }
+
+.phone-tabs {
+  display: flex; flex-shrink: 0; border-top: 1px solid var(--color-accent-800);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--color-accent-900);
+}
+.phone-tab {
+  flex: 1; min-width: 0; min-height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  border: 0; background: transparent; color: var(--color-accent-300); cursor: pointer; font: inherit; position: relative;
+  touch-action: manipulation;
+}
+.phone-tab.is-on { color: var(--color-bg); box-shadow: inset 0 2px 0 var(--color-accent-400); background: var(--color-accent-800); }
+.phone-tab:focus-visible { outline: 2px solid var(--color-accent-400); outline-offset: -2px; }
+.phone-tab-icon { position: relative; display: grid; place-items: center; }
+.phone-tab-label { font-size: 11px; font-weight: 500; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.phone-badge {
+  position: absolute; top: -6px; left: 14px; min-width: 16px; padding: 0 4px;
+  font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
+  background: var(--color-signal); color: var(--color-bg);
+}
+/* Toasts sit below the phone's top bar */
+@media (max-width: 640px) {
+  .toasts { top: calc(env(safe-area-inset-top) + 62px); right: 12px; left: 12px; align-items: stretch; }
+  .toast { width: auto; }
+}
 </style>

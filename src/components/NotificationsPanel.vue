@@ -1,11 +1,16 @@
 <template>
-  <aside ref="panelRef" :class="['drawer', 'cb-scroll', { 'beside-rail': sidebarCollapsed }]" role="dialog" aria-label="Notifications">
+  <aside
+    ref="panelRef"
+    :class="['drawer', 'cb-scroll', { 'beside-rail': sidebarCollapsed, 'is-page': asPage }]"
+    :role="asPage ? null : 'dialog'"
+    aria-label="Notifications"
+  >
     <div class="head">
       <div class="head-text">
         <span class="kicker">{{ isManager ? 'Send to your team' : 'From your manager' }}</span>
         <span class="title">Notifications</span>
       </div>
-      <button class="btn btn-ghost btn-icon close" title="Close (Esc)" @click="$emit('close')">
+      <button v-if="!asPage" class="btn btn-ghost btn-icon close" title="Close (Esc)" @click="$emit('close')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
       </button>
     </div>
@@ -42,11 +47,14 @@
         <option v-for="p in recipients" :key="p.id" :value="p.id">{{ p.displayName }}</option>
       </select>
       <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
+      <div v-if="pushNote" class="push-note">{{ pushNote }}</div>
       <button type="submit" class="btn btn-primary send" :disabled="isSending || !form.title.trim()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" /><path d="m21.854 2.147-10.94 10.939" /></svg>
         {{ isSending ? 'Sending…' : 'Send notification' }}
       </button>
     </form>
+
+    <PushAlertsToggle />
 
     <!-- List -->
     <div class="list-head cb-label">{{ isManager ? 'Sent and received' : 'Inbox' }} · {{ notifications.length }}</div>
@@ -88,6 +96,8 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { AUDIENCES, sendNotification, deleteNotification } from '../services/notificationService';
+import { pushConfigured, sendPushFor } from '../services/pushService';
+import PushAlertsToggle from './PushAlertsToggle.vue';
 import { currentStaffUser } from '../services/authService';
 import { SHIFTS, getShiftConfig, shiftHours } from '../config/shifts';
 import { initials } from '../utils/format';
@@ -98,7 +108,9 @@ const props = defineProps({
   unreadIds: { type: Object, default: () => new Set() },
   isManager: { type: Boolean, default: false },
   roster: { type: Array, default: () => [] },
-  sidebarCollapsed: { type: Boolean, default: false }
+  sidebarCollapsed: { type: Boolean, default: false },
+  // Phone layout: a full page instead of a drawer (no close button, no click-outside)
+  asPage: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['close', 'changed', 'sent']);
@@ -108,6 +120,7 @@ const myId = computed(() => currentStaffUser.value?.id);
 const recipients = computed(() => props.roster.filter(p => p.isActive && p.id !== myId.value));
 const isSending = ref(false);
 const errorMessage = ref('');
+const pushNote = ref('');
 const form = reactive({ title: '', body: '', audience: 'ALL', shift: 'MORNING', staffId: '' });
 
 function audienceLabel(n) {
@@ -136,8 +149,9 @@ async function send() {
   }
   isSending.value = true;
   errorMessage.value = '';
+  pushNote.value = '';
   try {
-    await sendNotification({
+    const sent = await sendNotification({
       title: form.title,
       body: form.body,
       audience: form.audience,
@@ -148,10 +162,23 @@ async function send() {
     Object.assign(form, { title: '', body: '' });
     emit('sent', to);
     emit('changed');
+    if (pushConfigured) deliverToPhones(sent.id);
   } catch (err) {
     errorMessage.value = err.message || 'Could not send the notification';
   } finally {
     isSending.value = false;
+  }
+}
+
+// The notification is already saved; phone alerts are a best-effort extra
+async function deliverToPhones(id) {
+  try {
+    const r = await sendPushFor(id);
+    pushNote.value = r.sent
+      ? `Alert sent to ${r.sent} phone${r.sent === 1 ? '' : 's'}.`
+      : 'Nobody it was sent to has phone alerts on yet.';
+  } catch (err) {
+    pushNote.value = `Saved, but phone alerts were not sent: ${err.message}.`;
   }
 }
 
@@ -173,6 +200,7 @@ function onDocumentClick(e) {
 }
 
 onMounted(() => {
+  if (props.asPage) return;
   window.addEventListener('keydown', onKeydown);
   setTimeout(() => document.addEventListener('click', onDocumentClick));
 });
@@ -192,6 +220,11 @@ onUnmounted(() => {
 .drawer { transition: left 200ms cubic-bezier(0.2, 0, 0, 1); }
 @media (max-width: 1240px) { .drawer { left: 200px; } }
 .drawer.beside-rail { left: 60px; }
+.drawer.is-page {
+  position: static; width: auto; max-width: none; overflow: visible; padding: 0;
+  background: transparent; border: 0; box-shadow: none; transition: none;
+}
+.push-note { font-size: 12px; color: var(--color-neutral-700); }
 
 .head { display: flex; align-items: flex-start; justify-content: space-between; }
 .head-text { display: flex; flex-direction: column; gap: 2px; }

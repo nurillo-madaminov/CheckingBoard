@@ -41,6 +41,37 @@ npm run build      # production build in dist/
 
 Double-clicking `start.bat` also runs the dev server.
 
+## 📱 Phone app & push alerts
+
+CheckingBoard installs on phones as an app (Android: **Install app**; iPhone: Safari → Share →
+**Add to Home Screen**). Staff check in and out there; managers see attendance.
+
+Check-in works as soon as `supabase_schema.sql` has been re-run and a manager has set the office on
+the Shifts page. **Phone alerts** (push notifications) need a one-time setup:
+
+1. **Keys.** The public key goes in `.env` (and on your host, e.g. Vercel → Settings → Environment
+   Variables, then redeploy):
+   ```
+   VITE_VAPID_PUBLIC_KEY=...
+   ```
+   The private key goes in `supabase/.env.push` (git-ignored):
+   ```
+   VAPID_PUBLIC_KEY=...
+   VAPID_PRIVATE_KEY=...
+   VAPID_SUBJECT=mailto:you@example.com
+   ```
+   To make a new pair: `npx web-push generate-vapid-keys`.
+2. **Upload the secrets and deploy the function** (Supabase CLI; sign in once with your Supabase
+   account, `your-project-ref` is in the project URL):
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref your-project-ref
+   npx supabase secrets set --env-file supabase/.env.push
+   npx supabase functions deploy send-push
+   ```
+
+Without these steps everything else works; only the phone pop-ups are missing.
+
 ## ✅ Tests
 
 The test suite runs against a real Supabase **test** project with `supabase_schema.sql` applied

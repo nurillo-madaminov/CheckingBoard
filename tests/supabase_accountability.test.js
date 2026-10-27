@@ -500,4 +500,144 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(data.office_radius_m, 150);
     assert.equal(typeof data.office_lat, 'number');
   });
+
+  // ---------------- attendance (phone check-in / check-out) ----------------
+  // Tashkent minutes after midnight for "now", so a test shift can start N minutes ago
+  const tashkentNowMin = () => {
+    const d = new Date(Date.now() + 5 * 3600e3);
+    return d.getUTCHours() * 60 + d.getUTCMinutes();
+  };
+  const startedAgo = (shift, minutes) => {
+    const start = (tashkentNowMin() - minutes + 1440) % 1440;
+    return [1, 2, 3, 4, 5, 6, 7].map(weekday => ({ shift_code: shift, weekday, start_min: start, end_min: (start + 480) % 1440 }));
+  };
+  const atOffice = { p_lat: 41.311081, p_lng: 69.240562, p_accuracy_m: 12 };   // the office from test 19-23
+  const farAway = { p_lat: 41.330000, p_lng: 69.240562, p_accuracy_m: 12 };    // ~2.1 km north
+
+  test('24. Attendance rules: managers set "late after"; staff and bad values are rejected', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const denied = await john.rpc('set_attendance_rules', { p_late_after_min: 60 });
+    assert.match(denied.error?.message || '', /Only managers/);
+    for (const bad of [-1, 241, null]) {
+      const r = await mgrA.rpc('set_attendance_rules', { p_late_after_min: bad });
+      assert.match(r.error?.message || '', /between 0 and 240/, String(bad));
+    }
+    const r = await mgrA.rpc('set_attendance_rules', { p_late_after_min: 15 });
+    assert.equal(r.error, null, r.error?.message);
+    const { data } = await john.from('teams').select('late_after_min').single();
+    assert.equal(data.late_after_min, 15, 'staff read the rule');
+  });
+
+  test('25. Check-in / check-out: office radius enforced, time and lateness from the server', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    // John on AFTERNOON, which started 30 minutes ago today (late: 30 > 15)
+    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id] } });
+    assert.equal(r.error, null, r.error?.message);
+    r = await mgrA.rpc('save_shift_hours', { p_hours: startedAgo('AFTERNOON', 30) });
+    assert.equal(r.error, null, r.error?.message);
+
+    r = await mgrA.rpc('clear_office_location');
+    assert.equal(r.error, null, r.error?.message);
+    const noOffice = await john.rpc('check_in', atOffice);
+    assert.match(noOffice.error?.message || '', /not set the office/);
+    r = await mgrA.rpc('set_office_location', office);
+    assert.equal(r.error, null, r.error?.message);
+
+    const far = await john.rpc('check_in', farAway);
+    assert.match(far.error?.message || '', /You are \d+ m from Tashkent office\. You need to be within 150 m/);
+    const badFix = await john.rpc('check_in', { ...atOffice, p_lat: 95 });
+    assert.match(badFix.error?.message || '', /location could not be read/);
+
+    const before = Date.now();
+    const inRes = await john.rpc('check_in', atOffice);
+    assert.equal(inRes.error, null, inRes.error?.message);
+    const row = inRes.data;
+    assert.equal(row.staff_id, staffA1Id);
+    assert.equal(row.staff_name_snapshot, 'Jonathan Doe Senior');
+    assert.equal(row.shift_code, 'AFTERNOON');
+    assert.ok(Math.abs(Date.parse(row.check_in_at) - before) < 5 * 60e3, 'server time');
+    assert.ok(row.check_in_distance_m < 1, 'distance measured on the server');
+    assert.ok(row.late_min >= 29 && row.late_min <= 32, `late by about 30 min (${row.late_min})`);
+    assert.equal(row.late_after_min, 15);
+    assert.equal(row.is_late, true);
+
+    const twice = await john.rpc('check_in', atOffice);
+    assert.match(twice.error?.message || '', /already checked in/);
+    const outFar = await john.rpc('check_out', farAway);
+    assert.match(outFar.error?.message || '', /You need to be within 150 m/);
+    const outRes = await john.rpc('check_out', atOffice);
+    assert.equal(outRes.error, null, outRes.error?.message);
+    assert.ok(outRes.data.check_out_at, 'checked out');
+    assert.equal(outRes.data.id, row.id);
+    const again = await john.rpc('check_in', atOffice);
+    assert.match(again.error?.message || '', /already checked in and out of this shift/);
+    const outAgain = await john.rpc('check_out', atOffice);
+    assert.match(outAgain.error?.message || '', /not checked in/);
+  });
+
+  test('26. Attendance: on time vs late, unassigned refused, staff see only their own, no direct writes', async () => {
+    const kate = await mustSignIn(uname('kate'), pw);
+    const john = await mustSignIn(uname('john'), pw);
+    const kateId = (await kate.auth.getUser()).data.user.id;
+    // Kate unassigned first
+    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id] } });
+    assert.equal(r.error, null, r.error?.message);
+    const unassigned = await kate.rpc('check_in', atOffice);
+    assert.match(unassigned.error?.message || '', /not on a shift/);
+
+    // Kate on NIGHT, which started 5 minutes ago: on time
+    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id], NIGHT: [kateId] } });
+    assert.equal(r.error, null, r.error?.message);
+    r = await mgrA.rpc('save_shift_hours', { p_hours: [...startedAgo('AFTERNOON', 30), ...startedAgo('NIGHT', 5)] });
+    assert.equal(r.error, null, r.error?.message);
+    const k = await kate.rpc('check_in', atOffice);
+    assert.equal(k.error, null, k.error?.message);
+    assert.equal(k.data.shift_code, 'NIGHT');
+    assert.equal(k.data.is_late, false, `5 min is within the 15 min rule (${k.data.late_min})`);
+
+    const johnSees = (await john.from('attendance').select('staff_id')).data;
+    assert.ok(johnSees.length >= 1 && johnSees.every(a => a.staff_id === staffA1Id), 'staff read only their own');
+    const mgrSees = new Set((await mgrA.from('attendance').select('staff_id')).data.map(a => a.staff_id));
+    assert.ok(mgrSees.has(staffA1Id) && mgrSees.has(kateId), 'managers read the team');
+    const other = await mgrB.from('attendance').select('id');
+    assert.equal(other.data.length, 0, 'other teams see nothing');
+
+    const forged = await john.from('attendance').insert({ team_id: 'x', shift_code: 'MORNING', shift_date: '2026-01-01', shift_start: new Date().toISOString(), shift_end: new Date().toISOString(), check_in_lat: 0, check_in_lng: 0, check_in_distance_m: 0 });
+    assert.ok(forged.error, 'no direct inserts');
+    const edit = await mgrA.from('attendance').update({ is_late: false }).eq('staff_id', staffA1Id).select();
+    assert.ok(edit.error || (edit.data?.length || 0) === 0, 'no direct edits, even for managers');
+
+    r = await kate.rpc('check_out', atOffice);
+    assert.equal(r.error, null, r.error?.message);
+    // Leave the default hours for later tests
+    r = await mgrA.rpc('save_shift_hours', { p_hours: [] });
+    assert.equal(r.error, null, r.error?.message);
+  });
+
+  test('27. Push subscriptions: saved for the caller, private to them, removable', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const kate = await mustSignIn(uname('kate'), pw);
+    const sub = { p_endpoint: `https://push.example.com/${run}`, p_p256dh: 'BKey', p_auth: 'secret', p_user_agent: 'test' };
+    let r = await john.rpc('save_push_subscription', sub);
+    assert.equal(r.error, null, r.error?.message);
+    const bad = await john.rpc('save_push_subscription', { ...sub, p_endpoint: 'http://insecure' });
+    assert.match(bad.error?.message || '', /Invalid push subscription/);
+
+    const mine = await john.from('push_subscriptions').select('endpoint, staff_id');
+    assert.ok(mine.data.some(s => s.endpoint === sub.p_endpoint && s.staff_id === staffA1Id));
+    const theirs = await kate.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint);
+    assert.equal(theirs.data.length, 0, 'others cannot read it');
+    const direct = await john.from('push_subscriptions').insert({ endpoint: 'https://x', staff_id: staffA1Id, team_id: 'x', p256dh: 'a', auth: 'b' });
+    assert.ok(direct.error, 'no direct inserts');
+
+    // The same phone signed in as Kate now belongs to Kate
+    r = await kate.rpc('save_push_subscription', sub);
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal((await john.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint)).data.length, 0);
+    r = await john.rpc('delete_push_subscription', { p_endpoint: sub.p_endpoint });
+    assert.equal((await kate.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint)).data.length, 1, 'John cannot remove Kate\'s');
+    r = await kate.rpc('delete_push_subscription', { p_endpoint: sub.p_endpoint });
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal((await kate.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint)).data.length, 0);
+  });
 });
