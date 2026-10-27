@@ -10,7 +10,8 @@
  * - Subscriptions the push service reports as gone (404 / 410) are deleted.
  *
  * Secrets (supabase secrets set ...): VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
- * (e.g. mailto:you@example.com). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase.
+ * (e.g. mailto:you@example.com). Supabase provides SUPABASE_URL and the server key: the new
+ * SUPABASE_SECRET_KEYS (JSON, projects on the new API keys) or the legacy SUPABASE_SERVICE_ROLE_KEY.
  */
 import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
 import webpush from 'npm:web-push@3.6.7';
@@ -25,17 +26,33 @@ function reply(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
+// The server key: projects on the new API keys get SUPABASE_SECRET_KEYS ({"default": "sb_secret_..."});
+// there the legacy SUPABASE_SERVICE_ROLE_KEY may be switched off, so prefer the new one.
+function serverKey(): string | undefined {
+  try {
+    const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}');
+    const key = keys.default || Object.values(keys)[0];
+    if (typeof key === 'string' && key) return key;
+  } catch (_err) {
+    // Not set or not JSON: fall back to the legacy key
+  }
+  return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || undefined;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return reply({ error: 'Use POST' }, 405);
 
   try {
     const url = Deno.env.get('SUPABASE_URL');
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const serviceKey = serverKey();
     const vapidPublic = Deno.env.get('VAPID_PUBLIC_KEY');
     const vapidPrivate = Deno.env.get('VAPID_PRIVATE_KEY');
     const vapidSubject = Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@checkingboard.app';
-    if (!url || !serviceKey || !vapidPublic || !vapidPrivate) {
+    if (!url || !serviceKey) {
+      return reply({ error: 'send-push has no Supabase server key (SUPABASE_SECRET_KEYS / SUPABASE_SERVICE_ROLE_KEY)' }, 500);
+    }
+    if (!vapidPublic || !vapidPrivate) {
       return reply({ error: 'send-push is missing its secrets (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)' }, 500);
     }
 
@@ -46,13 +63,20 @@ Deno.serve(async (req) => {
 
     // Who is calling: an active manager of the notification's team
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!token || token.startsWith('sb_')) {
+      return reply({ error: 'Not signed in (the request carried an API key, not a user session)' }, 401);
+    }
     const { data: userData, error: userError } = await admin.auth.getUser(token);
-    if (userError || !userData?.user) return reply({ error: 'Not signed in' }, 401);
-    const { data: caller } = await admin
+    if (userError || !userData?.user) {
+      // Say why, so a wrong key or an expired session can be told apart
+      return reply({ error: `Not signed in (${userError?.message || 'no user for this session'})` }, 401);
+    }
+    const { data: caller, error: callerError } = await admin
       .from('staff_profiles')
       .select('id, team_id, role, is_active')
       .eq('id', userData.user.id)
       .maybeSingle();
+    if (callerError) throw callerError;
     if (!caller || !caller.is_active || caller.role !== 'manager') {
       return reply({ error: 'Only managers send notifications' }, 403);
     }

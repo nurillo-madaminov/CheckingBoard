@@ -116,7 +116,9 @@ export async function sendPushFor(notificationId) {
   if (error) {
     let detail = error.message || '';
     try {
-      detail = (await error.context?.json())?.error || detail;
+      // The function answers { error }; Supabase's gateway answers { msg } or { message }
+      const body = await error.context?.json();
+      detail = body?.error || body?.msg || body?.message || detail;
     } catch (e) {
       // Not a JSON error body (for example the function is not deployed)
     }
