@@ -71,12 +71,10 @@
           <div v-for="act in ACTION_TYPES" :key="act.code" class="right">{{ act.short }}</div>
           <div class="pad">Total</div>
         </div>
-        <div v-for="p in stats.byStaff" :key="p.staffId" class="cb-grid-row staff-grid">
+        <div v-for="p in staffRows" :key="p.staffId" class="cb-grid-row staff-grid">
           <div class="pad person">
             <span class="cb-avatar avatar">{{ initials(p.displayName) }}</span>
             <span class="cb-ellipsis strong">{{ p.displayName }}</span>
-            <span v-if="p.role === 'former'" class="tag tag-neutral">Former</span>
-            <span v-else-if="!p.isActive" class="tag tag-neutral">Deactivated</span>
           </div>
           <div class="cb-muted">{{ p.shiftCode ? getShiftConfig(p.shiftCode).label : '—' }}</div>
           <div v-for="act in ACTION_TYPES" :key="act.code" class="right num">{{ p[act.code] || 0 }}</div>
@@ -85,7 +83,7 @@
             <span class="cb-bar staff-bar"><span :style="{ width: `${barPct(p.total, staffMax)}%`, background: 'var(--color-accent-500)' }"></span></span>
           </div>
         </div>
-        <div v-if="!stats.byStaff.length" class="empty">No team members yet.</div>
+        <div v-if="!staffRows.length" class="empty">No team members yet.</div>
       </div>
     </div>
   </div>
@@ -150,7 +148,9 @@ const stats = computed(() => summarizeActivities(inPeriod.value, {
 }));
 
 const actionMax = computed(() => Math.max(1, ...ACTION_TYPES.map(a => stats.value.team[a.code] || 0)));
-const staffMax = computed(() => Math.max(1, ...stats.value.byStaff.map(p => p.total)));
+// Only active members are listed; deactivated and removed accounts still count in the totals above
+const staffRows = computed(() => stats.value.byStaff.filter(p => p.isActive));
+const staffMax = computed(() => Math.max(1, ...staffRows.value.map(p => p.total)));
 
 const chartCols = computed(() => {
   const days = dateRange(chartFrom.value, toDay.value).map(date => {

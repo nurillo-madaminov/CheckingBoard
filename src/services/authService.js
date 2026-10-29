@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { supabase } from './supabaseClient';
 import { setCustomShiftHours } from '../config/shifts';
 
@@ -14,7 +14,9 @@ import { setCustomShiftHours } from '../config/shifts';
 export const LOGIN_EMAIL_DOMAIN = 'checkingboard.internal';
 
 export const currentStaffUser = ref(null);   // signed-in profile
-export const staffProfiles = ref([]);        // team roster
+export const staffProfiles = ref([]);        // team roster, deactivated members included
+// Deactivated members appear only in Team & staff; every other list uses this
+export const activeStaffProfiles = computed(() => staffProfiles.value.filter(p => p.isActive));
 export const currentTeam = ref(null);        // { id, name }
 
 export function usernameToEmail(username) {

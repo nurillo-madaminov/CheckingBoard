@@ -30,6 +30,12 @@
         <span class="cb-sub">min</span>
         <button type="submit" class="btn btn-secondary" :disabled="lateDraft === lateAfter || isSaving">Save</button>
       </form>
+
+      <!-- Phone reminders 2 minutes before each shift starts / ends -->
+      <label v-if="reminders !== null" class="reminders" title="Phone alert to each person 2 minutes before their shift starts (check in) and ends (check out)">
+        <input type="checkbox" :checked="reminders" :disabled="isSavingReminders" @change="saveReminders($event.target.checked)" />
+        <span>Check-in / out reminders</span>
+      </label>
     </div>
 
     <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
@@ -95,8 +101,9 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import {
-  fetchAttendance, fetchAttendanceRules, setLateAfter, formatMinutesSpan
+  fetchAttendance, fetchAttendanceRules, setLateAfter, fetchShiftReminders, setShiftReminders, formatMinutesSpan
 } from '../services/attendanceService';
+import { staffProfiles, loadTeamRoster } from '../services/authService';
 import {
   getShiftConfig, currentWorkDay, formatWorkDayShort, formatTashkentClock, formatEasternClock
 } from '../config/shifts';
@@ -116,6 +123,9 @@ const lateAfter = ref(15);
 const lateDraft = ref(15);
 const isLoading = ref(false);
 const isSaving = ref(false);
+// null until loaded (or when the database script hasn't been re-run): the switch stays hidden
+const reminders = ref(null);
+const isSavingReminders = ref(false);
 const errorMessage = ref('');
 let loadSeq = 0;
 
@@ -139,9 +149,14 @@ function shiftMonth(n) {
 
 const isOpen = r => !r.check_out_at && Date.parse(r.shift_end) + 8 * 3600e3 > Date.now();
 
+// Deactivated (or removed) members are left out of the person filter and the summary;
+// their check-ins stay in the list below
+const deactivatedIds = computed(() => new Set(staffProfiles.value.filter(p => !p.isActive).map(p => p.id)));
+const isListed = r => r.staff_id && !deactivatedIds.value.has(r.staff_id);
+
 const people = computed(() => {
   const map = new Map();
-  rows.value.forEach(r => { if (r.staff_id && !map.has(r.staff_id)) map.set(r.staff_id, r.staff_name_snapshot); });
+  rows.value.forEach(r => { if (isListed(r) && !map.has(r.staff_id)) map.set(r.staff_id, r.staff_name_snapshot); });
   return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 });
 
@@ -150,8 +165,8 @@ const filtered = computed(() => (staffFilter.value ? rows.value.filter(r => r.st
 // Per person for the month: shifts, late count and minutes, missing check-outs
 const summary = computed(() => {
   const by = new Map();
-  filtered.value.forEach(r => {
-    const key = r.staff_id || r.staff_name_snapshot;
+  filtered.value.filter(isListed).forEach(r => {
+    const key = r.staff_id;
     const s = by.get(key) || { id: key, name: r.staff_name_snapshot || 'Unknown', shifts: 0, late: 0, lateMin: 0, missing: 0 };
     s.shifts += 1;
     if (r.is_late) { s.late += 1; s.lateMin += r.late_min; }
@@ -196,8 +211,36 @@ async function saveRule() {
   }
 }
 
+async function loadReminders() {
+  try {
+    reminders.value = await fetchShiftReminders();
+  } catch (err) {
+    reminders.value = null;
+    console.warn('Could not load the reminder setting:', err);
+  }
+}
+
+async function saveReminders(on) {
+  isSavingReminders.value = true;
+  try {
+    await setShiftReminders(on);
+    emit('saved', on
+      ? { title: 'Reminders on', message: 'Phone alert 2 min before each shift starts and ends' }
+      : { title: 'Reminders off', message: 'No check-in / check-out reminders' });
+  } catch (err) {
+    emit('error', { title: 'Reminder setting not saved', message: err.message });
+  } finally {
+    isSavingReminders.value = false;
+    await loadReminders();
+  }
+}
+
 watch(() => [month.value, props.refreshKey], load);
-onMounted(load);
+onMounted(() => {
+  load();
+  loadReminders();
+  loadTeamRoster().catch(() => {});
+});
 </script>
 
 <style scoped>
@@ -211,6 +254,8 @@ onMounted(load);
 .rule { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .rule label { color: var(--color-neutral-800); white-space: nowrap; }
 .rule-input { width: 70px; }
+.reminders { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--color-neutral-800); white-space: nowrap; cursor: pointer; }
+.reminders input { width: 16px; height: 16px; accent-color: var(--color-accent); cursor: pointer; }
 
 .summary, .records { display: flex; flex-direction: column; }
 .sum-row { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); align-items: center; min-height: 44px; padding: 0 14px; gap: 10px; font-size: 13px; border-top: 1px solid var(--color-hairline); }

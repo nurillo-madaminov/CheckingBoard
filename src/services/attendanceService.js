@@ -86,6 +86,24 @@ export async function fetchAttendance({ fromDate, toDate, staffId = '', limit = 
   return data || [];
 }
 
+// Check-in / check-out reminders on (true) or off for the team. Its own query, so check-in
+// keeps working on a database that hasn't got the column yet.
+export async function fetchShiftReminders() {
+  const { data, error } = await supabase.from('teams').select('shift_reminders_enabled').maybeSingle();
+  if (error) throw friendlyError(error, 'Could not load the reminder setting');
+  return data?.shift_reminders_enabled !== false;
+}
+
+export async function setShiftReminders(enabled) {
+  const { error } = await supabase.rpc('set_shift_reminders', { p_enabled: !!enabled });
+  if (error) {
+    if (/set_shift_reminders|schema cache/i.test(error.message || '')) {
+      throw new Error('Reminders need the updated database script. Re-run supabase_schema.sql in the Supabase SQL Editor.');
+    }
+    throw friendlyError(error, 'Could not save the reminder setting');
+  }
+}
+
 // Minutes as '1h 05m' / '22m'
 export function formatMinutesSpan(min) {
   const m = Math.max(0, Math.round(min || 0));

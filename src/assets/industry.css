@@ -104,6 +104,12 @@ select option { color: var(--color-text); background: var(--color-bg); font-fami
 .input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
 .input:focus-visible, .input:focus { border-color: var(--color-accent); outline: none; }
 textarea.input { min-height: 60px; resize: vertical; }
+/* iPhone Safari zooms into a focused field whose text is under 16px and stays zoomed
+   (sign-in swaps the view in place, so nothing resets it). Phone-sized touch screens
+   (the same ones that get the phone layout) use 16px form text; pinch zoom still works. */
+@media (pointer: coarse) and (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  input, select, textarea { font-size: 16px !important; }
+}
 /* Dropdowns draw their own chevron so it keeps the same inset as the text */
 select.input {
   appearance: none; -webkit-appearance: none; cursor: pointer;

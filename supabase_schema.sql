@@ -634,7 +634,13 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
     PERFORM public._cb_assert_manages(p_staff_id);
-    UPDATE public.staff_profiles SET is_active = p_active, updated_at = NOW() WHERE id = p_staff_id;
+    -- A deactivated member leaves their shift (so they drop out of shift lists,
+    -- shift-mate visibility and reminders); reactivating does not restore it
+    UPDATE public.staff_profiles
+    SET is_active = p_active,
+        shift_code = CASE WHEN p_active THEN shift_code ELSE NULL END,
+        updated_at = NOW()
+    WHERE id = p_staff_id;
     -- Block (or unblock) the login itself; history is never touched
     UPDATE auth.users
     SET banned_until = CASE WHEN p_active THEN NULL ELSE NOW() + INTERVAL '100 years' END,
@@ -642,9 +648,16 @@ BEGIN
     WHERE id::text = p_staff_id;
     IF NOT p_active THEN
         DELETE FROM auth.sessions WHERE user_id::text = p_staff_id;
+        -- Their phones stop getting alerts (the table is created in step 7D)
+        IF to_regclass('public.push_subscriptions') IS NOT NULL THEN
+            DELETE FROM public.push_subscriptions WHERE staff_id = p_staff_id;
+        END IF;
     END IF;
 END;
 $$;
+
+-- Earlier versions left deactivated members on their shift
+UPDATE public.staff_profiles SET shift_code = NULL WHERE NOT is_active AND shift_code IS NOT NULL;
 
 -- Any member can rename themselves (past activity snapshots keep the old name)
 CREATE OR REPLACE FUNCTION public.update_my_display_name(p_display_name TEXT)
@@ -1471,6 +1484,151 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.attendance;
     END IF;
 END $$;
+
+-- ------------------------------------------------------------------------------
+-- 7E. CHECK-IN / CHECK-OUT REMINDERS (phone alert 2 minutes before a shift starts / ends)
+-- ------------------------------------------------------------------------------
+-- Every minute pg_cron calls the shift-reminders Edge Function, which asks
+-- claim_shift_reminders() who is due and sends them a push alert. A manager turns
+-- reminders on or off for the whole team (set_shift_reminders). Who gets one:
+--   * check-in: an active member on a shift who has not checked in to that run yet
+--   * check-out: an active member who is checked in to that run and not out yet
+-- Each reminder is sent once (shift_reminders_sent). One-time setup: see
+-- setup_shift_reminders below and the README.
+
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS shift_reminders_enabled BOOLEAN NOT NULL DEFAULT true;
+
+-- Reminders already sent (kept two days, enough to never repeat one)
+CREATE TABLE IF NOT EXISTS public.shift_reminders_sent (
+    staff_id TEXT NOT NULL REFERENCES public.staff_profiles(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('CHECK_IN', 'CHECK_OUT')),
+    event_at TIMESTAMPTZ NOT NULL,             -- the shift start (check-in) or end (check-out)
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (staff_id, kind, event_at)
+);
+ALTER TABLE public.shift_reminders_sent ENABLE ROW LEVEL SECURITY;
+-- No policies: only the Edge Function (service role) and the functions below use it
+
+-- Where pg_cron sends its call, and the secret the Edge Function checks.
+-- One row; written by setup_shift_reminders, never readable by app users.
+CREATE TABLE IF NOT EXISTS public.cb_cron_config (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    project_url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.cb_cron_config ENABLE ROW LEVEL SECURITY;
+
+-- Manager turns the team's reminders on or off
+CREATE OR REPLACE FUNCTION public.set_shift_reminders(p_enabled BOOLEAN)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can change shift reminders' USING ERRCODE = '42501';
+    END IF;
+    IF p_enabled IS NULL THEN
+        RAISE EXCEPTION 'Choose on or off';
+    END IF;
+    UPDATE public.teams SET shift_reminders_enabled = p_enabled, updated_at = NOW()
+    WHERE id = public.current_team_id();
+END;
+$$;
+
+-- Reminders due now (the event is less than p_lead_min minutes away), each
+-- returned once: the call records them as sent. Called by the Edge Function only.
+CREATE OR REPLACE FUNCTION public.claim_shift_reminders(p_lead_min INT DEFAULT 2)
+RETURNS TABLE (staff_id TEXT, team_id TEXT, kind TEXT, shift_code TEXT, shift_date DATE, event_at TIMESTAMPTZ)
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    DELETE FROM public.shift_reminders_sent WHERE event_at < NOW() - interval '2 days';
+
+    WITH due AS (
+        SELECT p.id AS staff_id, p.team_id, e.kind, p.shift_code, d.day AS shift_date, e.event_at
+        FROM public.staff_profiles p
+        JOIN public.teams t ON t.id = p.team_id AND t.shift_reminders_enabled
+        -- Runs that start yesterday, today or tomorrow (Tashkent): covers night shifts and midnight
+        CROSS JOIN LATERAL (VALUES
+            ((NOW() AT TIME ZONE 'Asia/Tashkent')::date - 1),
+            ((NOW() AT TIME ZONE 'Asia/Tashkent')::date),
+            ((NOW() AT TIME ZONE 'Asia/Tashkent')::date + 1)
+        ) AS d(day)
+        CROSS JOIN LATERAL public.cb_shift_run(p.team_id, p.shift_code, d.day) AS r
+        CROSS JOIN LATERAL (VALUES ('CHECK_IN', r.starts), ('CHECK_OUT', r.ends)) AS e(kind, event_at)
+        WHERE p.is_active
+          AND p.shift_code IS NOT NULL
+          AND NOW() >= e.event_at - make_interval(mins => greatest(1, least(coalesce(p_lead_min, 2), 30)))
+          AND NOW() < e.event_at
+          AND CASE e.kind
+                  WHEN 'CHECK_IN' THEN NOT EXISTS (
+                      SELECT 1 FROM public.attendance a
+                      WHERE a.staff_id = p.id AND a.shift_date = d.day AND a.shift_code = p.shift_code)
+                  ELSE EXISTS (
+                      SELECT 1 FROM public.attendance a
+                      WHERE a.staff_id = p.id AND a.shift_date = d.day AND a.shift_code = p.shift_code
+                        AND a.check_out_at IS NULL)
+              END
+    ), claimed AS (
+        INSERT INTO public.shift_reminders_sent AS s (staff_id, kind, event_at)
+        SELECT due.staff_id, due.kind, due.event_at FROM due
+        ON CONFLICT DO NOTHING
+        RETURNING s.staff_id, s.kind, s.event_at
+    )
+    SELECT due.staff_id, due.team_id, due.kind, due.shift_code, due.shift_date, due.event_at
+    FROM claimed
+    JOIN due ON due.staff_id = claimed.staff_id AND due.kind = claimed.kind AND due.event_at = claimed.event_at
+$$;
+
+-- One-time setup, run by you in the SQL Editor after deploying the shift-reminders
+-- function (safe to run again, e.g. with a new project URL):
+--     SELECT public.setup_shift_reminders('https://your-project-ref.supabase.co');
+-- Turns on pg_cron + pg_net, stores the URL and a fresh secret, and schedules the
+-- every-minute call. To stop the schedule: SELECT cron.unschedule('cb-shift-reminders');
+CREATE OR REPLACE FUNCTION public.setup_shift_reminders(p_project_url TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+SET search_path = public, extensions, pg_temp
+AS $$
+DECLARE
+    v_url TEXT := rtrim(trim(coalesce(p_project_url, '')), '/');
+BEGIN
+    IF v_url !~ '^https://[^/]+$' THEN
+        RAISE EXCEPTION 'Pass the project URL, e.g. https://your-project-ref.supabase.co';
+    END IF;
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+    CREATE EXTENSION IF NOT EXISTS pg_net;
+
+    INSERT INTO public.cb_cron_config (id, project_url, secret, updated_at)
+    VALUES (1, v_url, encode(gen_random_bytes(32), 'hex'), NOW())
+    ON CONFLICT (id) DO UPDATE
+    SET project_url = EXCLUDED.project_url, secret = EXCLUDED.secret, updated_at = NOW();
+
+    -- Same name again replaces the job
+    PERFORM cron.schedule('cb-shift-reminders', '* * * * *', $job$
+        SELECT net.http_post(
+            url := (SELECT project_url FROM public.cb_cron_config WHERE id = 1) || '/functions/v1/shift-reminders',
+            headers := jsonb_build_object(
+                'Content-Type', 'application/json',
+                'x-cron-secret', (SELECT secret FROM public.cb_cron_config WHERE id = 1)),
+            body := '{}'::jsonb,
+            timeout_milliseconds := 30000
+        )
+    $job$);
+    RETURN 'Shift reminders scheduled every minute: ' || v_url || '/functions/v1/shift-reminders';
+END;
+$$;
+
+REVOKE ALL ON public.shift_reminders_sent, public.cb_cron_config FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.set_shift_reminders(BOOLEAN) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.set_shift_reminders(BOOLEAN) TO authenticated;
+REVOKE ALL ON FUNCTION public.claim_shift_reminders(INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_shift_reminders(INT) TO service_role;
+REVOKE ALL ON FUNCTION public.setup_shift_reminders(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.cb_cron_config TO service_role;
+GRANT SELECT, INSERT, DELETE ON public.shift_reminders_sent TO service_role;
 
 -- ------------------------------------------------------------------------------
 -- 8. CLAIM THE LEGACY FLEET (run by you in the SQL editor, never from the app)

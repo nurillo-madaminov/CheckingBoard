@@ -81,11 +81,6 @@
               </option>
             </select>
           </div>
-
-          <div class="week">
-            <span>Actions last 7 days</span>
-            <span class="week-num">{{ weekCounts[shift.code] ?? '…' }}</span>
-          </div>
         </div>
       </div>
     </div>
@@ -111,23 +106,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
 import {
-  SHIFTS, WEEKDAYS, getShiftConfig, shiftHours, shiftsOnDuty, currentWorkDay, addDays,
+  SHIFTS, WEEKDAYS, getShiftConfig, shiftHours, shiftsOnDuty, currentWorkDay,
   isoWeekday, customShiftHours, formatMinutes, parseMinutes
 } from '../config/shifts';
 import {
   staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours, isCurrentUserManager
 } from '../services/authService';
-import { fetchActivities } from '../services/activityService';
 import { initials } from '../utils/format';
 // Loaded on demand: the map library is only needed here, by managers
 const OfficeLocationCard = defineAsyncComponent(() => import('./OfficeLocationCard.vue'));
-
-const props = defineProps({
-  // Bumped by the app after this user records an action
-  refreshKey: { type: Number, default: 0 }
-});
 
 const emit = defineEmits(['saved', 'office-saved', 'office-error']);
 
@@ -141,7 +130,6 @@ const errorMessage = ref('');
 const onDuty = ref(shiftsOnDuty());
 const today = ref(currentWorkDay());
 const todayIso = computed(() => isoWeekday(today.value));
-const weekCounts = ref({});
 let clockTimer = null;
 
 function defaultRange(shift) {
@@ -283,15 +271,6 @@ function nameOf(memberId) {
 const unassigned = computed(() => activeMembers.value.filter(m => m.role !== 'manager' && !shiftOf(m.id)));
 
 // ---------------- load & save ----------------
-async function loadWeekCounts() {
-  try {
-    const rows = await fetchActivities({ fromDate: addDays(today.value, -6), toDate: today.value });
-    weekCounts.value = Object.fromEntries(SHIFTS.map(s => [s.code, rows.filter(r => r.shift_code === s.code).length]));
-  } catch (err) {
-    console.warn('Could not load weekly shift counts:', err);
-  }
-}
-
 async function save() {
   isSaving.value = true;
   errorMessage.value = '';
@@ -311,8 +290,6 @@ async function save() {
   }
 }
 
-watch(() => props.refreshKey, loadWeekCounts);
-
 onMounted(() => {
   resetDraft();
   Promise.all([loadTeamRoster(), loadShiftHours()])
@@ -322,7 +299,6 @@ onMounted(() => {
       resetDraft();
     })
     .catch(err => { errorMessage.value = err.message; });
-  loadWeekCounts();
   clockTimer = setInterval(() => {
     onDuty.value = shiftsOnDuty();
     today.value = currentWorkDay();
@@ -373,8 +349,6 @@ onUnmounted(() => clearInterval(clockTimer));
 .remove { color: var(--color-neutral-700); flex-shrink: 0; }
 .add-person { font-size: 14px; background-color: var(--color-bg); }
 
-.week { display: flex; justify-content: space-between; font-size: 12px; color: var(--color-neutral-700); padding-top: 4px; border-top: 1px solid var(--color-hairline); }
-.week-num { font-family: var(--font-heading); font-size: 15px; color: var(--color-text); }
 
 .unassigned { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }

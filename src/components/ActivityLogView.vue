@@ -93,7 +93,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { ACTION_TYPES, getActionTypeConfig, fetchActivities } from '../services/activityService';
-import { isCurrentUserManager, currentStaffUser, staffProfiles as roster } from '../services/authService';
+import { isCurrentUserManager, currentStaffUser, activeStaffProfiles } from '../services/authService';
 import {
   SHIFTS,
   getShiftConfig,
@@ -112,7 +112,8 @@ const props = defineProps({
 });
 
 const isManager = computed(() => isCurrentUserManager());
-const staffProfiles = computed(() => roster.value);
+// Deactivated members are not offered as a filter (their past records still show)
+const staffProfiles = computed(() => activeStaffProfiles.value);
 const today = currentWorkDay();
 
 // Staff see their own records plus their shift-mates' on that shift (the database enforces this)

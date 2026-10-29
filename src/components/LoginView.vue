@@ -106,12 +106,19 @@ const teamForm = reactive({
   password: ''
 });
 
+// Close the phone keyboard before the sign-in view is replaced, so the app opens
+// without the keyboard's scroll offset
+function blurField() {
+  document.activeElement?.blur?.();
+}
+
 function setMode(next) {
   mode.value = next;
   errorMessage.value = '';
 }
 
 async function handleLogin() {
+  blurField();
   errorMessage.value = '';
   isLoading.value = true;
   try {
@@ -125,6 +132,7 @@ async function handleLogin() {
 }
 
 async function handleCreateTeam() {
+  blurField();
   errorMessage.value = '';
   isLoading.value = true;
   try {

@@ -9,57 +9,24 @@
  *   members only, never the sender.
  * - Subscriptions the push service reports as gone (404 / 410) are deleted.
  *
- * Secrets (supabase secrets set ...): VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
- * (e.g. mailto:you@example.com). Supabase provides SUPABASE_URL and the server key: the new
- * SUPABASE_SECRET_KEYS (JSON, projects on the new API keys) or the legacy SUPABASE_SERVICE_ROLE_KEY.
+ * Secrets: see ../_shared/push.ts.
  */
-import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
-import webpush from 'npm:web-push@3.6.7';
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS'
-};
-
-function reply(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-}
-
-// The server key: projects on the new API keys get SUPABASE_SECRET_KEYS ({"default": "sb_secret_..."});
-// there the legacy SUPABASE_SERVICE_ROLE_KEY may be switched off, so prefer the new one.
-function serverKey(): string | undefined {
-  try {
-    const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}');
-    const key = keys.default || Object.values(keys)[0];
-    if (typeof key === 'string' && key) return key;
-  } catch (_err) {
-    // Not set or not JSON: fall back to the legacy key
-  }
-  return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || undefined;
-}
+import { corsHeaders, reply, pushSetup, pushToStaff } from '../_shared/push.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return reply({ error: 'Use POST' }, 405);
 
   try {
-    const url = Deno.env.get('SUPABASE_URL');
-    const serviceKey = serverKey();
-    const vapidPublic = Deno.env.get('VAPID_PUBLIC_KEY');
-    const vapidPrivate = Deno.env.get('VAPID_PRIVATE_KEY');
-    const vapidSubject = Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@checkingboard.app';
-    if (!url || !serviceKey) {
-      return reply({ error: 'send-push has no Supabase server key (SUPABASE_SECRET_KEYS / SUPABASE_SERVICE_ROLE_KEY)' }, 500);
-    }
-    if (!vapidPublic || !vapidPrivate) {
-      return reply({ error: 'send-push is missing its secrets (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)' }, 500);
+    let admin;
+    try {
+      admin = pushSetup('send-push');
+    } catch (err) {
+      return reply({ error: (err as Error).message }, 500);
     }
 
     const { notification_id: notificationId } = await req.json().catch(() => ({}));
     if (!notificationId) return reply({ error: 'notification_id is required' }, 400);
-
-    const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
     // Who is calling: an active manager of the notification's team
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
@@ -91,39 +58,14 @@ Deno.serve(async (req) => {
     const { data: recipients, error: peopleError } = await people;
     if (peopleError) throw peopleError;
     const ids = (recipients || []).map(p => p.id).filter(id => id !== n.sender_id);
-    if (!ids.length) return reply({ sent: 0, failed: 0, removed: 0 });
 
-    const { data: subs, error: subsError } = await admin
-      .from('push_subscriptions')
-      .select('endpoint, p256dh, auth')
-      .eq('team_id', n.team_id)
-      .in('staff_id', ids);
-    if (subsError) throw subsError;
-
-    webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
-    const payload = JSON.stringify({
+    const result = await pushToStaff(admin, n.team_id, ids, {
       title: n.title,
       body: n.body || `From ${n.sender_name || 'your manager'}`,
       tag: n.id,
       url: '/?view=notifications'
     });
-
-    let sent = 0;
-    let failed = 0;
-    const gone: string[] = [];
-    await Promise.all((subs || []).map(async (s) => {
-      try {
-        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 60 * 60 * 24 });
-        sent += 1;
-      } catch (err) {
-        failed += 1;
-        const status = (err as { statusCode?: number }).statusCode;
-        if (status === 404 || status === 410) gone.push(s.endpoint);
-      }
-    }));
-    if (gone.length) await admin.from('push_subscriptions').delete().in('endpoint', gone);
-
-    return reply({ sent, failed, removed: gone.length });
+    return reply(result);
   } catch (err) {
     return reply({ error: (err as Error)?.message || String(err) }, 500);
   }

@@ -64,18 +64,20 @@ self.addEventListener('push', (event) => {
   }));
 });
 
-// Tapping an alert opens (or focuses) the app on its Notifications page
+// Tapping an alert opens (or focuses) the app on the page in its link
+// (?view=notifications for a manager's notification, ?view=checkin for a shift reminder)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || '/?view=notifications', self.location.origin).href;
+  const target = new URL(event.notification.data?.url || '/?view=notifications', self.location.origin);
+  const view = target.searchParams.get('view') || 'notifications';
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
       if (new URL(client.url).origin === self.location.origin) {
-        client.postMessage({ type: 'open-notifications' });
+        client.postMessage({ type: 'open-view', view });
         return client.focus();
       }
     }
-    return self.clients.openWindow(target);
+    return self.clients.openWindow(target.href);
   })());
 });

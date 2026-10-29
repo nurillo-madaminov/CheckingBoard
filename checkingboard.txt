@@ -406,7 +406,14 @@ D. TEAM & STAFF MANAGEMENT MODAL (`StaffSwitchModal.vue`, top bar user pill):
   * "⭐ Promote to Manager" / "Demote to Staff" (rpc set_staff_role).
   * "🔑 Reset Password" (rpc reset_staff_password): also signs that user out everywhere.
   * "Deactivate" / "Activate" (rpc set_staff_active): blocks the login and all data
-    access; history is kept. Managers cannot change their own role or status.
+    access; history is kept. Deactivating also takes the person off their shift and
+    removes their phones from push alerts (reactivating does not put them back on a
+    shift). Managers cannot change their own role or status.
+- Deactivated members are listed ONLY here (marked "Deactivated"). Everywhere else
+  (shift cards and pickers, Logs staff filter, Statistics per-staff table,
+  Attendance person filter and month summary, notification recipients, on-duty list,
+  Team page) shows active members only. Their past records stay: log rows and
+  check-in rows keep their name snapshot, and team / shift totals still count them.
 - There is no "switch user" button: with real logins you sign in as yourself.
 
 E. SIGN OUT:
@@ -467,7 +474,8 @@ C. MANAGER PAGES (top bar):
   Save Schedule / Discard for people and hours together.
 - Statistics: a date range picked on a calendar (up to 31 days, see 16B). Shows
   all-3-shift totals per action, per-shift totals with who did them, a per-staff
-  table, and a day-by-day breakdown by shift for multi-day periods.
+  table (active members only; totals include everyone), and a day-by-day breakdown
+  by shift for multi-day periods.
 
 D. DATABASE CHANGES (supabase_schema.sql, safe to re-run):
 - New columns staff_profiles.shift_code, activities.shift_code, activities.shift_date;
@@ -522,8 +530,7 @@ square hairline-bordered objects. The only warm color is the signal
 - Logs: day stepper (click the day to pick any date), shift filter and staff filter
   for managers (staff on a shift get a shift-mate filter), search, clickable
   per-action count tiles.
-- Shifts: the shift on duty is drawn dark; each card shows its hours, its people
-  and actions in the last 7 days.
+- Shifts: the shift on duty is drawn dark; each card shows its hours and its people.
 - Statistics: a calendar range picker (click a start day, then an end day; up to
   31 days, nothing after today); day-by-day stacked columns (at least a
   week shown) in three steel shades for Morning / Afternoon / Night.
@@ -703,8 +710,65 @@ I. TESTS: 24 (late rule), 25 (check-in / out: radius, server time, lateness,
    writes), 27 (push subscriptions).
 
 --------------------------------------------------------------------------------
+16F. CHECK-IN / CHECK-OUT REMINDERS
+--------------------------------------------------------------------------------
+A. WHAT STAFF GET:
+- A phone alert 2 minutes before their shift starts ("Check in now · Your Morning
+  shift starts at 07:00 (Tashkent)") and 2 minutes before it ends ("Check out before
+  you leave"). Tapping it opens the app on Check in.
+- Check-in reminder: only if they have not checked in to that shift run yet.
+  Check-out reminder: only if they are checked in to that run and not out yet.
+- Needs phone alerts turned on on that phone (Notifications page) like any push.
+- Goes to active members with a shift (managers too, if they are on a shift).
+
+B. MANAGER SWITCH: "Check-in / out reminders" on the Attendance page (PC and phone),
+   on by default, for the whole team (rpc set_shift_reminders, managers only). The
+   switch is hidden until the database script has been re-run.
+
+C. HOW IT RUNS (no app needs to be open):
+- pg_cron calls the shift-reminders Edge Function every minute (pg_net HTTP POST
+  with the secret header x-cron-secret).
+- The function checks the secret against public.cb_cron_config, then calls
+  claim_shift_reminders(2): every active member on a shift, in a team with reminders
+  on, whose shift start / end (team hours via cb_shift_run, runs starting yesterday,
+  today or tomorrow) is less than 2 minutes away. Each reminder is recorded in
+  shift_reminders_sent (staff, CHECK_IN / CHECK_OUT, event time) and returned once;
+  rows older than 2 days are cleared. The function sends one Web Push per group
+  (team + kind + shift + time) through supabase/functions/_shared/push.ts, which
+  send-push uses too.
+
+D. DATABASE (supabase_schema.sql section 7E, safe to re-run):
+- teams.shift_reminders_enabled (default true); tables shift_reminders_sent and
+  cb_cron_config (RLS on, no policies, no client grants).
+- rpc set_shift_reminders (managers); claim_shift_reminders (service role only);
+  setup_shift_reminders(project_url) (run by you in the SQL Editor only): turns on
+  pg_cron and pg_net, stores the URL and a new random secret, and schedules the job
+  'cb-shift-reminders' every minute (running it again replaces the job and secret).
+- set_staff_active(false) now clears the person's shift and deletes their push
+  subscriptions; the script also clears the shift of anyone already deactivated.
+
+E. SETUP (once, after phone alerts work, see README "Shift reminders"):
+1. Re-run supabase_schema.sql.
+2. npx supabase functions deploy shift-reminders --no-verify-jwt
+3. In the SQL Editor: SELECT public.setup_shift_reminders('https://<ref>.supabase.co');
+To stop the schedule entirely: SELECT cron.unschedule('cb-shift-reminders');
+
+F. TESTS: 28 (reminder switch: managers only), 29 (deactivation clears the shift and
+   the phones; reminder internals are not reachable by app users).
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - SHIFT REMINDERS & DEACTIVATED STAFF (re-run supabase_schema.sql):
+- Phone reminders 2 minutes before each shift starts (check in) and ends (check
+  out); managers turn them on / off on the Attendance page (section 16F). Needs the
+  shift-reminders Edge Function and a one-time setup_shift_reminders call.
+- Deactivated staff appear only in Team & staff; deactivation also takes them off
+  their shift and removes their phones from alerts (section 15 D).
+- Shifts page: removed the "Actions last 7 days" count from the shift cards.
+- Tapping a phone alert opens the page it links to (?view=checkin or notifications).
+- Tests 28-29.
+
 OCTOBER 2026 - PHONE APP, CHECK-IN & PUSH ALERTS (re-run supabase_schema.sql):
 - CheckingBoard installs as a phone app (PWA). Phones get a phone layout: staff
   check in / out, read notifications and see their team; managers get shifts,
