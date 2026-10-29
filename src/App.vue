@@ -38,14 +38,13 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
           :notifications="notifications"
           :unreadIds="unreadIdsAtOpen"
           :isManager="isManager"
-          :roster="staffProfiles"
+          :roster="activeStaffProfiles"
           @changed="loadNotifications"
           @sent="showToast({ title: 'Notification sent', message: $event })"
         />
       </div>
       <ShiftControlView
         v-else-if="phoneTab === 'shifts' && isManager"
-        :refreshKey="activityVersion"
         @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
         @office-saved="showToast($event)"
         @office-error="showErrorToast($event.title, $event.message)"
@@ -87,7 +86,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :isLive="isLive"
       :boardCount="tabCounts.CHECKING_BOARD"
       :todayActivities="todayActivities"
-      :roster="staffProfiles"
+      :roster="activeStaffProfiles"
       :unreadCount="unreadCount"
       :notificationsOpen="showNotifications"
       @update:collapsed="toggleSidebar"
@@ -103,7 +102,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :notifications="notifications"
       :unreadIds="unreadIdsAtOpen"
       :isManager="isManager"
-      :roster="staffProfiles"
+      :roster="activeStaffProfiles"
       :sidebarCollapsed="railCollapsed"
       @close="showNotifications = false"
       @changed="loadNotifications"
@@ -149,7 +148,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       <!-- 3. SHIFT CONTROL PANEL (manager) -->
       <ShiftControlView
         v-else-if="activeView === 'shifts' && isManager"
-        :refreshKey="activityVersion"
         @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
         @office-saved="showToast($event)"
         @office-error="showErrorToast($event.title, $event.message)"
@@ -266,7 +264,7 @@ import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import {
   currentStaffUser,
   currentTeam,
-  staffProfiles,
+  activeStaffProfiles,
   initAuth,
   logoutUser
 } from './services/authService';
@@ -370,13 +368,23 @@ function resetPhoneTab() {
   phoneTab.value = phoneTabs.value[0].id;
 }
 
-// From a tapped phone alert (service worker message) or a ?view=notifications link
+// From a tapped phone alert (service worker message) or a ?view=... link
 function openNotifications() {
   if (isPhone.value) phoneTab.value = 'notifications';
   else showNotifications.value = true;
 }
+// A shift reminder opens Check in (phone tab for staff); anything else opens the notifications
+function openView(view) {
+  if (view === 'checkin' && isPhone.value && phoneTabs.value.some(t => t.id === 'checkin')) {
+    phoneTab.value = 'checkin';
+  } else if (view !== 'checkin') {
+    openNotifications();
+  }
+}
 function onServiceWorkerMessage(e) {
-  if (e.data?.type === 'open-notifications' && currentUser.value) openNotifications();
+  if (!currentUser.value) return;
+  if (e.data?.type === 'open-view') openView(e.data.view);
+  else if (e.data?.type === 'open-notifications') openNotifications();
 }
 navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
 
@@ -538,10 +546,10 @@ watch(() => currentUser.value?.id, async (id, oldId) => {
   if (!id || id === oldId) return;
   activeView.value = 'fleet';
   resetPhoneTab();
-  // Opened from a phone alert: go straight to the notifications
+  // Opened from a phone alert: go straight to the notifications or check-in
   const params = new URLSearchParams(window.location.search);
-  if (params.get('view') === 'notifications') {
-    openNotifications();
+  if (params.has('view')) {
+    openView(params.get('view'));
     params.delete('view');
     const rest = params.toString();
     window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);

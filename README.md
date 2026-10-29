@@ -72,6 +72,24 @@ the Shifts page. **Phone alerts** (push notifications) need a one-time setup:
 
 Without these steps everything else works; only the phone pop-ups are missing.
 
+### ⏰ Shift reminders (check in / check out)
+
+Once phone alerts work, staff can get a reminder 2 minutes before their shift starts and ends.
+Managers switch it on or off on the **Attendance** page. It needs one more function and a
+one-time schedule:
+
+1. Deploy the function (it is called by the database, not a user, hence `--no-verify-jwt`):
+   ```bash
+   npx supabase functions deploy shift-reminders --no-verify-jwt
+   ```
+2. In the Supabase **SQL Editor** (use your project URL):
+   ```sql
+   SELECT public.setup_shift_reminders('https://your-project-ref.supabase.co');
+   ```
+   This turns on `pg_cron` and `pg_net`, creates a private secret and calls the function every
+   minute. If it says an extension is not available, enable **pg_cron** and **pg_net** under
+   Database → Extensions and run it again. To stop it: `SELECT cron.unschedule('cb-shift-reminders');`
+
 ## ✅ Tests
 
 The test suite runs against a real Supabase **test** project with `supabase_schema.sql` applied

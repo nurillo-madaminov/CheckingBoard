@@ -128,7 +128,7 @@ import {
   OFFICE_RADIUS_MIN, OFFICE_RADIUS_MAX, OFFICE_RADIUS_DEFAULT,
   fetchOfficeLocation, setOfficeLocation, clearOfficeLocation
 } from '../services/officeService';
-import { staffProfiles } from '../services/authService';
+import { activeStaffProfiles } from '../services/authService';
 import { formatTashkentDateTime, formatEasternDateTime } from '../config/shifts';
 
 const emit = defineEmits(['saved', 'error']);
@@ -182,7 +182,7 @@ const statusLine = computed(() => {
   const s = saved.value;
   if (!s) return 'No office set yet. Pin it on the map or use your current location, then save.';
   if (!s.updatedAt) return `${s.name} · ${s.radiusM} m radius`;
-  const who = staffProfiles.value.find(p => p.id === s.updatedBy)?.displayName || 'a former manager';
+  const who = activeStaffProfiles.value.find(p => p.id === s.updatedBy)?.displayName || 'a former manager';
   return `Last set by ${who} on ${formatTashkentDateTime(s.updatedAt)} Tashkent · ${formatEasternDateTime(s.updatedAt)} ET`;
 });
 

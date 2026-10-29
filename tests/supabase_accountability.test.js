@@ -640,4 +640,52 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(r.error, null, r.error?.message);
     assert.equal((await kate.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint)).data.length, 0);
   });
+
+  test('28. Shift reminders: managers switch them on / off; the internals are out of reach', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const denied = await john.rpc('set_shift_reminders', { p_enabled: false });
+    assert.match(denied.error?.message || '', /Only managers/);
+
+    let r = await mgrA.rpc('set_shift_reminders', { p_enabled: false });
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal((await john.from('teams').select('shift_reminders_enabled').single()).data.shift_reminders_enabled, false, 'staff read the setting');
+    r = await mgrA.rpc('set_shift_reminders', { p_enabled: true });
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal((await mgrA.from('teams').select('shift_reminders_enabled').single()).data.shift_reminders_enabled, true);
+
+    for (const client of [john, mgrA]) {
+      const claim = await client.rpc('claim_shift_reminders', { p_lead_min: 2 });
+      assert.ok(claim.error, 'only the Edge Function (service role) claims reminders');
+      const setup = await client.rpc('setup_shift_reminders', { p_project_url: 'https://example.supabase.co' });
+      assert.ok(setup.error, 'setup runs only in the SQL Editor');
+      const config = await client.from('cb_cron_config').select('secret');
+      assert.ok(config.error || (config.data?.length || 0) === 0, 'the cron secret is never readable');
+      const sent = await client.from('shift_reminders_sent').select('staff_id');
+      assert.ok(sent.error || (sent.data?.length || 0) === 0, 'sent reminders are not readable');
+    }
+  });
+
+  test('29. Deactivating someone takes them off their shift and removes their phones', async () => {
+    let kate = await mustSignIn(uname('kate'), pw);
+    const kateId = (await kate.auth.getUser()).data.user.id;
+    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id], MORNING: [kateId] } });
+    assert.equal(r.error, null, r.error?.message);
+    const sub = { p_endpoint: `https://push.example.com/deact-${run}`, p_p256dh: 'BKey', p_auth: 'secret', p_user_agent: 'test' };
+    r = await kate.rpc('save_push_subscription', sub);
+    assert.equal(r.error, null, r.error?.message);
+
+    r = await mgrA.rpc('set_staff_active', { p_staff_id: kateId, p_active: false });
+    assert.equal(r.error, null, r.error?.message);
+    const { data: profile } = await mgrA.from('staff_profiles').select('is_active, shift_code').eq('id', kateId).single();
+    assert.equal(profile.is_active, false);
+    assert.equal(profile.shift_code, null, 'no longer on a shift');
+
+    r = await mgrA.rpc('set_staff_active', { p_staff_id: kateId, p_active: true });
+    assert.equal(r.error, null, r.error?.message);
+    kate = await mustSignIn(uname('kate'), pw);
+    const subs = await kate.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint);
+    assert.equal(subs.data.length, 0, 'phone alerts were removed');
+    const again = (await mgrA.from('staff_profiles').select('shift_code').eq('id', kateId).single()).data;
+    assert.equal(again.shift_code, null, 'reactivating does not put them back on a shift');
+  });
 });
