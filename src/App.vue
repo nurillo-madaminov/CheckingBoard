@@ -9,8 +9,15 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
     </div>
   </div>
 
-  <!-- RESTORING SESSION -->
-  <div v-else-if="authLoading" class="center-screen loading">Loading CheckingBoard…</div>
+  <!-- RESTORING SESSION (a saved sign-in is retried while offline, not dropped) -->
+  <div v-else-if="authLoading" class="center-screen loading">
+    <div v-if="sessionReconnecting" class="reconnecting">
+      <span>Reconnecting to CheckingBoard…</span>
+      <span class="cb-sub">You're still signed in. Check your internet connection.</span>
+      <button class="btn btn-secondary" @click="handleLogout">Sign out</button>
+    </div>
+    <template v-else>Loading CheckingBoard…</template>
+  </div>
 
   <!-- NOT SIGNED IN: SIGN IN / CREATE A TEAM -->
   <LoginView v-else-if="!currentUser" />
@@ -265,6 +272,7 @@ import {
   currentStaffUser,
   currentTeam,
   activeStaffProfiles,
+  sessionReconnecting,
   initAuth,
   logoutUser
 } from './services/authService';
@@ -1057,6 +1065,7 @@ function handleResetData() {
 .center-screen { height: 100vh; height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--color-surface); }
 .loading { font-family: var(--font-heading); font-size: 18px; color: var(--color-neutral-700); }
 .setup { width: min(520px, 100%); }
+.reconnecting { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
 .setup-code { margin: 0; padding: 12px; font-size: 12px; background: var(--color-bg); border: 1px solid var(--color-divider); white-space: pre-wrap; }
 
 .toasts { position: fixed; top: 16px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
