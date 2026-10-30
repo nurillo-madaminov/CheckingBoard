@@ -26,11 +26,10 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <div v-else-if="isPhone" class="phone">
     <header class="phone-top">
       <span class="phone-mark">CB</span>
-      <!-- Your name opens Profile settings -->
-      <button :class="['phone-title', { 'is-on': phoneTab === 'profile' }]" title="Profile settings" aria-label="Profile settings" @click="phoneTab = 'profile'">
+      <div class="phone-title">
         <span class="phone-team cb-ellipsis">{{ currentTeam?.name || 'CheckingBoard' }}</span>
-        <span class="phone-user cb-ellipsis">{{ currentUser.displayName }} · {{ currentUser.role }} · Profile</span>
-      </button>
+        <span class="phone-user cb-ellipsis">{{ currentUser.displayName }} · {{ roleLabel(currentUser.role) }}</span>
+      </div>
       <span :class="['live-dot', { 'is-live': isLive }]" :title="isLive ? 'Live' : 'Connecting…'"></span>
       <button class="phone-signout" title="Sign out" aria-label="Sign out" @click="handleLogout">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></svg>
@@ -38,7 +37,8 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
     </header>
 
     <main class="phone-main">
-      <div v-if="phoneTab === 'checkin'" class="cb-page cb-scroll"><CheckInView :refreshKey="attendanceVersion" /></div>
+      <TodayView v-if="phoneTab === 'today' && isManager" :refreshKey="attendanceVersion" />
+      <div v-else-if="phoneTab === 'checkin'" class="cb-page cb-scroll"><CheckInView :refreshKey="attendanceVersion" /></div>
       <div v-else-if="phoneTab === 'team' && !isManager" class="cb-page cb-scroll"><TeamView /></div>
       <TeamManagementView
         v-else-if="phoneTab === 'team' && isManager"
@@ -46,26 +46,14 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         @saved="showToast($event)"
         @error="showErrorToast($event.title, $event.message)"
       />
-      <ProfileView v-else-if="phoneTab === 'profile'" @logout="handleLogout" />
-      <div v-else-if="phoneTab === 'notifications'" class="cb-page cb-scroll">
-        <NotificationsPanel
-          asPage
-          :notifications="notifications"
-          :unreadIds="unreadIdsAtOpen"
-          :isManager="isManager"
-          :roster="activeStaffProfiles"
-          @changed="loadNotifications"
-          @sent="showToast({ title: 'Notification sent', message: $event })"
-        />
-      </div>
-      <ShiftControlView
-        v-else-if="phoneTab === 'shifts' && isManager"
-        @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
-        @office-saved="showToast($event)"
-        @office-error="showErrorToast($event.title, $event.message)"
+      <PhoneMoreView
+        v-else-if="phoneTab === 'more' && isManager"
+        :activeDrivers="drivers"
+        :refreshKey="activityVersion"
+        @toast="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
       />
-      <ActivityLogView v-else-if="phoneTab === 'logs' && isManager" :activeDrivers="drivers" :refreshKey="activityVersion" />
-      <DailyStatisticsView v-else-if="phoneTab === 'stats' && isManager" :refreshKey="activityVersion" />
+      <ProfileView v-else-if="phoneTab === 'profile'" @logout="handleLogout" />
     </main>
 
     <nav class="phone-tabs" aria-label="Sections">
@@ -78,7 +66,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       >
         <span class="phone-tab-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" v-html="t.icon"></svg>
-          <span v-if="t.id === 'notifications' && unreadCount" class="phone-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
         </span>
         <span class="phone-tab-label">{{ t.label }}</span>
       </button>
@@ -96,25 +83,9 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :boardCount="tabCounts.CHECKING_BOARD"
       :todayActivities="todayActivities"
       :roster="activeStaffProfiles"
-      :unreadCount="unreadCount"
-      :notificationsOpen="showNotifications"
       @update:collapsed="toggleSidebar"
       @navigate="navigateTo"
-      @open-notifications="showNotifications = !showNotifications"
       @logout="handleLogout"
-    />
-
-    <!-- Notifications drawer (slides out beside the sidebar) -->
-    <NotificationsPanel
-      v-if="showNotifications"
-      :notifications="notifications"
-      :unreadIds="unreadIdsAtOpen"
-      :isManager="isManager"
-      :roster="activeStaffProfiles"
-      :sidebarCollapsed="railCollapsed"
-      @close="showNotifications = false"
-      @changed="loadNotifications"
-      @sent="showToast({ title: 'Notification sent', message: $event })"
     />
 
     <main class="main">
@@ -253,16 +224,18 @@ import ActivityLogView from './components/ActivityLogView.vue';
 import ShiftControlView from './components/ShiftControlView.vue';
 import DailyStatisticsView from './components/DailyStatisticsView.vue';
 import ExtensionsView from './components/ExtensionsView.vue';
-import NotificationsPanel from './components/NotificationsPanel.vue';
 import LoginView from './components/LoginView.vue';
 import CheckInView from './components/CheckInView.vue';
 import TeamView from './components/TeamView.vue';
 import TeamManagementView from './components/TeamManagementView.vue';
 import ProfileView from './components/ProfileView.vue';
+import TodayView from './components/TodayView.vue';
+import PhoneMoreView from './components/PhoneMoreView.vue';
 import { syncPushSubscription, forgetThisDevice } from './services/pushService';
 
 import { BOTTOM_TABS, getStatusConfig, getStatusTab } from './config/statusConfig';
 import { currentWorkDay, clockTashkent } from './config/shifts';
+import { canManage, checksIn, roleLabel } from './config/roles';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import {
   currentStaffUser,
@@ -273,7 +246,6 @@ import {
   logoutUser
 } from './services/authService';
 import { fetchActivities } from './services/activityService';
-import { fetchNotifications, fetchReadIds, markRead } from './services/notificationService';
 import * as db from './services/supabaseService';
 import { driverLabel as driverLabelOf } from './utils/format';
 
@@ -281,9 +253,9 @@ import { driverLabel as driverLabelOf } from './utils/format';
 // State: everything comes from the shared team database
 // ---------------------------------------------------------------------------
 const currentUser = computed(() => currentStaffUser.value);
-// Only managers add or remove companies and remove drivers; everyone adds drivers
-// (also enforced by the database)
-const isManager = computed(() => currentUser.value?.role === 'manager');
+// Managers and supervisors add or remove companies and remove drivers; everyone adds
+// drivers (also enforced by the database)
+const isManager = computed(() => canManage(currentUser.value?.role));
 const authLoading = ref(isSupabaseConfigured);
 const companies = ref([]);
 const drivers = ref([]);
@@ -343,50 +315,49 @@ phoneQuery.addEventListener('change', onPhoneChange);
 
 const ICONS = {
   checkin: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" />',
-  notifications: '<path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />',
+  today: '<rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /><path d="m9 16 2 2 4-4" />',
+  more: '<circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" />',
+  profile: '<circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />',
   team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />',
-  shifts: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h5" /><path d="M17.5 17.5 16 16.3V14" /><circle cx="16" cy="16" r="6" />',
-  logs: '<path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />',
-  stats: '<path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />'
 };
 
-// Staff: check in, notifications, team. Managers: shifts, logs, statistics, attendance, notifications.
-const phoneTabs = computed(() => (isManager.value
-  ? [
-      { id: 'shifts', label: 'Shifts' },
-      { id: 'logs', label: 'Logs' },
-      { id: 'stats', label: 'Stats' },
-      { id: 'team', label: 'Team' },
-      { id: 'notifications', label: 'Alerts' }
-    ]
-  : [
-      { id: 'checkin', label: 'Check in' },
-      { id: 'notifications', label: 'Alerts' },
-      { id: 'team', label: 'Team' }
-    ]).map(t => ({ ...t, icon: ICONS[t.id] })));
+// Staff: Check in, Team, Profile. Supervisors: Today, Check in, Team, More, Profile.
+// Managers (no check-in): Today, Team, More, Profile.
+const phoneTabs = computed(() => {
+  const role = currentUser.value?.role;
+  const tabs = isManager.value
+    ? [
+        { id: 'today', label: 'Today' },
+        ...(checksIn(role) ? [{ id: 'checkin', label: 'Check in' }] : []),
+        { id: 'team', label: 'Team' },
+        { id: 'more', label: 'More' },
+        { id: 'profile', label: 'Profile' }
+      ]
+    : [
+        { id: 'checkin', label: 'Check in' },
+        { id: 'team', label: 'Team' },
+        { id: 'profile', label: 'Profile' }
+      ];
+  return tabs.map(t => ({ ...t, icon: ICONS[t.id] }));
+});
 const phoneTab = ref('checkin');
 
 function resetPhoneTab() {
   phoneTab.value = phoneTabs.value[0].id;
 }
+// A role change (e.g. staff -> supervisor) can remove the open tab
+watch(phoneTabs, (tabs) => {
+  if (!tabs.some(t => t.id === phoneTab.value)) resetPhoneTab();
+});
 
-// From a tapped phone alert (service worker message) or a ?view=... link
-function openNotifications() {
-  if (isPhone.value) phoneTab.value = 'notifications';
-  else showNotifications.value = true;
-}
-// A shift reminder opens Check in (phone tab for staff); anything else opens the notifications
+// A shift reminder (tapped phone alert or ?view=checkin link) opens Check in
 function openView(view) {
   if (view === 'checkin' && isPhone.value && phoneTabs.value.some(t => t.id === 'checkin')) {
     phoneTab.value = 'checkin';
-  } else if (view !== 'checkin') {
-    openNotifications();
   }
 }
 function onServiceWorkerMessage(e) {
-  if (!currentUser.value) return;
-  if (e.data?.type === 'open-view') openView(e.data.view);
-  else if (e.data?.type === 'open-notifications') openNotifications();
+  if (currentUser.value && e.data?.type === 'open-view') openView(e.data.view);
 }
 navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
 
@@ -473,7 +444,6 @@ function setupRealtime() {
       }
     },
     onActivityInsert: onActivityLogged,
-    onNotificationChange,
     onAttendanceChange: () => { attendanceVersion.value += 1; },
     onFleetReset: async () => {
       drivers.value = sortDrivers(await db.fetchDrivers());
@@ -512,7 +482,6 @@ async function enterTeam() {
   await loadFleet();
   setupRealtime();
   loadTodayActivities();
-  loadNotifications();
   await runSignReset();
   if (signResetTimer) clearInterval(signResetTimer);
   // Midnight rollover without reloading: the database decides if a reset is due
@@ -532,9 +501,6 @@ function leaveTeam() {
   companies.value = [];
   drivers.value = [];
   todayActivities.value = [];
-  notifications.value = [];
-  readIds.value = new Set();
-  showNotifications.value = false;
   confirmState.value = null;
   activeView.value = 'fleet';
 }
@@ -547,7 +513,7 @@ watch(() => currentUser.value?.id, async (id, oldId) => {
   if (!id || id === oldId) return;
   activeView.value = 'fleet';
   resetPhoneTab();
-  // Opened from a phone alert: go straight to the notifications or check-in
+  // Opened from a shift reminder: go straight to Check in
   const params = new URLSearchParams(window.location.search);
   if (params.has('view')) {
     openView(params.get('view'));
@@ -724,47 +690,6 @@ function handleReorderTabs({ draggedId, targetId, position }) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Notifications (managers send, staff receive)
-// ---------------------------------------------------------------------------
-const notifications = ref([]);
-const readIds = ref(new Set());
-const showNotifications = ref(false);
-// Unread when the drawer was opened, so they stay marked "New" while it is open
-const unreadIdsAtOpen = ref(new Set());
-
-// Managers see what they sent; only what others sent counts as unread
-const incomingNotifications = computed(() =>
-  notifications.value.filter(n => n.sender_id !== currentUser.value?.id)
-);
-const unreadCount = computed(() => incomingNotifications.value.filter(n => !readIds.value.has(n.id)).length);
-
-async function loadNotifications() {
-  try {
-    const list = await fetchNotifications();
-    notifications.value = list;
-    readIds.value = await fetchReadIds(list.map(n => n.id));
-  } catch (err) {
-    console.warn('Could not load notifications:', err);
-  }
-}
-
-// The drawer on a PC, the Alerts tab on a phone
-const notificationsOpen = computed(() => (isPhone.value ? phoneTab.value === 'notifications' : showNotifications.value));
-
-watch(notificationsOpen, async (open) => {
-  if (!open) return;
-  const unread = incomingNotifications.value.filter(n => !readIds.value.has(n.id)).map(n => n.id);
-  unreadIdsAtOpen.value = new Set(unread);
-  if (!unread.length) return;
-  try {
-    await markRead(unread, currentUser.value.id);
-    readIds.value = new Set([...readIds.value, ...unread]);
-  } catch (err) {
-    console.warn('Could not mark notifications read:', err);
-  }
-});
-
 // Actions arrive from the Leader ELD extension; refresh counts and open log views
 let activityRefreshTimer = null;
 function onActivityLogged() {
@@ -773,15 +698,6 @@ function onActivityLogged() {
     activityVersion.value += 1;
     loadTodayActivities();
   }, 800);
-}
-
-async function onNotificationChange(payload) {
-  await loadNotifications();
-  const n = payload.new;
-  if (payload.eventType === 'INSERT' && n?.id && n.sender_id !== currentUser.value?.id
-      && notifications.value.some(x => x.id === n.id)) {
-    showToast({ title: n.title, message: n.body || `From ${n.sender_name}` });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,13 +1000,9 @@ function handleResetData() {
   width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center;
   background: var(--color-accent); font-family: var(--font-heading); font-weight: 600; font-size: 13px;
 }
-.phone-title {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; text-align: left;
-  border: 0; padding: 4px 6px; margin: -4px 0 -4px -6px; background: transparent; color: inherit; font: inherit; cursor: pointer;
-}
-.phone-title:active, .phone-title.is-on { background: var(--color-accent-800); }
+.phone-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
 .phone-team { font-family: var(--font-heading); font-weight: 600; font-size: 17px; }
-.phone-user { font-size: 12px; color: var(--color-accent-300); text-transform: capitalize; }
+.phone-user { font-size: 12px; color: var(--color-accent-300); }
 .live-dot { width: 7px; height: 7px; flex-shrink: 0; background: var(--color-neutral-600); }
 .live-dot.is-live { background: var(--color-accent-400); }
 .phone-signout {
@@ -1116,11 +1028,6 @@ function handleResetData() {
 .phone-tab:focus-visible { outline: 2px solid var(--color-accent-400); outline-offset: -2px; }
 .phone-tab-icon { position: relative; display: grid; place-items: center; }
 .phone-tab-label { font-size: 11px; font-weight: 500; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.phone-badge {
-  position: absolute; top: -6px; left: 14px; min-width: 16px; padding: 0 4px;
-  font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
-  background: var(--color-signal); color: var(--color-bg);
-}
 /* Toasts sit below the phone's top bar */
 @media (max-width: 640px) {
   .toasts { top: calc(env(safe-area-inset-top) + 62px); right: 12px; left: 12px; align-items: stretch; }

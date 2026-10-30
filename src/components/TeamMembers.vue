@@ -15,13 +15,20 @@
             <span class="who-meta cb-ellipsis">@{{ profile.username || profile.email }} · {{ shiftName(profile.shiftCode) }}</span>
           </div>
         </div>
-        <span :class="['role', { 'is-manager': profile.role === 'manager' }]">{{ profile.role }}</span>
+        <span :class="['role', `is-${profile.role}`]">{{ roleLabel(profile.role) }}</span>
         <span class="state">{{ profile.isActive ? 'Active' : 'Deactivated' }}</span>
         <div class="member-actions">
           <template v-if="profile.id !== currentUser?.id">
-            <button v-if="profile.isActive" class="btn btn-ghost" :disabled="isSaving" @click="toggleRole(profile)">
-              {{ profile.role === 'manager' ? 'Demote to staff' : 'Promote to manager' }}
-            </button>
+            <select
+              v-if="profile.isActive"
+              class="input role-select"
+              :value="profile.role"
+              :disabled="isSaving"
+              :aria-label="`Role of ${profile.displayName}`"
+              @change="changeRole(profile, $event)"
+            >
+              <option v-for="r in ROLES" :key="r.code" :value="r.code">{{ r.label }}</option>
+            </select>
             <button class="btn btn-ghost" @click="togglePasswordReset(profile)">Reset password</button>
             <button class="btn btn-ghost" :disabled="isSaving" @click="askToggleActive(profile)">
               {{ profile.isActive ? 'Deactivate' : 'Activate' }}
@@ -65,10 +72,18 @@
           <input id="new-pass" v-model="newStaffForm.password" class="input" type="text" required minlength="6" placeholder="At least 6 characters" />
         </div>
         <div class="seg role-seg">
-          <button type="button" :class="['seg-btn', { 'is-on': newStaffForm.role === 'staff' }]" @click="newStaffForm.role = 'staff'">Staff</button>
-          <button type="button" :class="['seg-btn', { 'is-on': newStaffForm.role === 'manager' }]" @click="newStaffForm.role = 'manager'">Manager</button>
+          <button
+            v-for="r in ROLES"
+            :key="r.code"
+            type="button"
+            :class="['seg-btn', { 'is-on': newStaffForm.role === r.code }]"
+            @click="newStaffForm.role = r.code"
+          >
+            {{ r.label }}
+          </button>
         </div>
       </div>
+      <span class="cb-sub hint">Supervisors lead a group: they have every manager power and check in / out. Managers run the whole team and don't check in.</span>
       <div class="create-actions">
         <button type="submit" class="btn btn-primary" :disabled="isSaving">Create account</button>
       </div>
@@ -98,6 +113,7 @@ import {
   setStaffActive
 } from '../services/authService';
 import { getShiftConfig } from '../config/shifts';
+import { ROLES, roleLabel } from '../config/roles';
 import { initials } from '../utils/format';
 
 const currentUser = computed(() => currentStaffUser.value);
@@ -166,9 +182,11 @@ async function confirmDeactivate() {
   await run(() => setStaffActive(profile.id, false), `${profile.displayName} has been deactivated. Their log entries are kept.`);
 }
 
-async function toggleRole(profile) {
-  const next = profile.role === 'manager' ? 'staff' : 'manager';
-  await run(() => setStaffRole(profile.id, next), `${profile.displayName} is now ${next === 'manager' ? 'a manager' : 'staff'}.`);
+async function changeRole(profile, event) {
+  const next = event.target.value;
+  const ok = await run(() => setStaffRole(profile.id, next), `${profile.displayName} is now ${next === 'staff' ? 'staff' : `a ${roleLabel(next).toLowerCase()}`}.`);
+  // The list keeps the old role on failure; put the picker back to match it
+  if (!ok) event.target.value = profile.role;
 }
 
 async function handleCreateStaff() {
@@ -195,7 +213,7 @@ onMounted(() => {
 
 .roster { display: flex; flex-direction: column; }
 .member {
-  display: grid; grid-template-columns: minmax(0, 1fr) 84px 84px 340px; align-items: center; gap: 10px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 96px 84px 340px; align-items: center; gap: 10px;
   padding: 8px 12px; border-top: 1px solid var(--color-hairline);
 }
 .member:first-child { border-top: 0; }
@@ -210,6 +228,9 @@ onMounted(() => {
   background: var(--color-accent-100); color: var(--color-accent-800);
 }
 .role.is-manager { background: var(--color-accent); color: var(--color-bg); }
+.role.is-supervisor { background: var(--color-accent-300); color: var(--color-accent-900); }
+.role-select { width: auto; min-height: 30px; padding-block: 2px; font-size: 13px; background-color: var(--color-bg); }
+.hint { font-size: 12px; }
 .state { font-size: 12px; color: var(--color-neutral-700); }
 .member-actions { display: flex; gap: 2px; justify-content: flex-end; flex-wrap: wrap; }
 .member-actions .btn { font-size: 13px; }

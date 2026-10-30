@@ -2,7 +2,7 @@
   <div v-if="state && state !== 'unconfigured'" :class="['push', { 'is-on': state === 'on' }]">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="push-icon"><rect width="14" height="20" x="5" y="2" rx="2" /><path d="M12 18h.01" /></svg>
     <div class="push-text">
-      <span class="push-title">Phone alerts {{ state === 'on' ? 'on' : 'off' }}</span>
+      <span class="push-title">Shift reminders on this phone {{ state === 'on' ? 'on' : 'off' }}</span>
       <span class="push-sub">{{ message || stateText }}</span>
     </div>
     <button v-if="state === 'off'" type="button" class="btn btn-primary" :disabled="busy" @click="turnOn">{{ busy ? 'Turning on…' : 'Turn on' }}</button>
@@ -19,10 +19,10 @@ const busy = ref(false);
 const message = ref('');
 
 const stateText = computed(() => ({
-  on: 'New notifications pop up on this device, even when the app is closed.',
-  off: 'Get a pop-up on this device when a notification arrives.',
+  on: 'A reminder pops up 2 minutes before your shift starts and ends, even when the app is closed.',
+  off: 'Get a reminder 2 minutes before your shift starts and ends.',
   'needs-install': 'On iPhone, first tap Share → Add to Home Screen, then open CheckingBoard from the home screen.',
-  unsupported: 'This browser can\'t show alerts. Notifications still appear here.',
+  unsupported: 'This browser can\'t show reminders.',
   denied: 'Alerts are blocked for this site. Allow notifications in your browser or phone settings.'
 }[state.value] || ''));
 

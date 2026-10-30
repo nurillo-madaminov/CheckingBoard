@@ -48,11 +48,6 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" /></svg>
         <span class="nav-label fade">Extensions</span>
       </button>
-      <button :class="['nav-item', { 'is-on': notificationsOpen }]" title="Notifications" @click="$emit('open-notifications')">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /></svg>
-        <span class="nav-label fade">Notifications</span>
-        <span v-if="unreadCount" class="nav-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-      </button>
     </nav>
 
     <!-- Shift on duty -->
@@ -99,7 +94,7 @@
         <span class="cb-avatar me-avatar">{{ myInitials }}</span>
         <span class="me-text fade">
           <span class="cb-ellipsis me-name">{{ currentUser?.displayName }}</span>
-          <span class="dim small me-role">{{ currentUser?.role }} · Profile settings</span>
+          <span class="dim small me-role">{{ roleLabel(currentUser?.role) }} · Profile settings</span>
         </span>
       </button>
       <button class="signout" title="Sign out" @click="$emit('logout')">
@@ -113,6 +108,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getShiftConfig, shiftProgress, shiftHours, clockTashkent, clockEastern } from '../config/shifts';
 import { initials } from '../utils/format';
+import { canManage, roleLabel } from '../config/roles';
 
 const props = defineProps({
   activeView: { type: String, default: 'fleet' },
@@ -124,19 +120,17 @@ const props = defineProps({
   todayActivities: { type: Array, default: () => [] },
   roster: { type: Array, default: () => [] },
   // Closed = a slim icon rail
-  collapsed: { type: Boolean, default: false },
-  unreadCount: { type: Number, default: 0 },
-  notificationsOpen: { type: Boolean, default: false }
+  collapsed: { type: Boolean, default: false }
 });
 
-defineEmits(['navigate', 'logout', 'open-notifications', 'update:collapsed']);
+defineEmits(['navigate', 'logout', 'update:collapsed']);
 
 const now = ref(new Date());
 let timer = null;
 onMounted(() => { timer = setInterval(() => { now.value = new Date(); }, 15000); });
 onUnmounted(() => clearInterval(timer));
 
-const isManager = computed(() => props.currentUser?.role === 'manager');
+const isManager = computed(() => canManage(props.currentUser?.role));
 const myInitials = computed(() => initials(props.currentUser?.displayName));
 const duty = computed(() => shiftProgress(now.value));
 const dutyShift = computed(() => getShiftConfig(duty.value.code));
@@ -235,10 +229,6 @@ const dutyStaff = computed(() => {
   border: 0; background: transparent; color: var(--color-accent-300); cursor: pointer;
 }
 .collapse-btn:hover { background: var(--color-accent-800); color: var(--color-bg); }
-.nav-badge {
-  min-width: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center;
-  background: var(--color-signal); color: var(--color-bg);
-}
 
 /* Closed: a slim rail of icons; labels show as tooltips.
    Only the width animates. Every child keeps the open sidebar's width and is clipped,
@@ -270,10 +260,8 @@ const dutyStaff = computed(() => {
 /* Nav: the same left padding open and closed puts each icon on the rail's center line */
 .nav-item { padding-left: 13px; position: relative; }
 /* The hidden labels still take room, so without this the icon is squeezed to nothing when closed */
-.nav-item > svg, .nav-badge { flex-shrink: 0; }
-.side.is-collapsed .nav-item { width: 44px; }
-.side.is-collapsed .nav-badge { position: absolute; top: 3px; left: 28px; min-width: 16px; padding: 0 3px; font-size: 10px; line-height: 16px; }
-.live { padding-left: 27px; }
+.nav-item > svg, .side.is-collapsed .nav-item { width: 44px; }
+.side.is-collapsed .live { padding-left: 27px; }
 
 /* Me: the sign-out button slides above the avatar when closed */
 .me { position: relative; padding: 10px 8px 10px 14px; transition: padding-top var(--ease); }

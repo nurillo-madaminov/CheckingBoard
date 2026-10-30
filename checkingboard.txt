@@ -493,7 +493,7 @@ C. MANAGER PAGES (top bar):
   plus per-action counts for the selection.
 - Shifts: shift control panel. Three shift cards, each with its hours (Tashkent,
   today's shown in the card head with US Eastern) as one "Every day" range or seven
-  weekday ranges ("Different per day" / "Same every day"; +1 marks a next-day end),
+  weekday ranges ("Different per day" / "Same every day"; an end before the start is the next day),
   and a people list with remove buttons and a "+ Add a person…" picker (picking
   someone from another shift moves them). "On duty now" badge, unassigned list, one
   Save Schedule / Discard for people and hours together.
@@ -567,8 +567,10 @@ square hairline-bordered objects. The only warm color is the signal
   or the 1-5 shortcuts. The Leader ELD extension writes the activities; new rows
   arrive live (Realtime on activities) and refresh the Logs page, KPI cards and the
   sidebar counts.
-- Notifications (NotificationsPanel.vue, services/notificationService.js): the 🔔
-  Notifications item in the sidebar opens a drawer with an unread badge. Managers
+- Notifications: REMOVED in the October 2026 roles update (section 16G); the team
+  uses Telegram. The notifications / notification_reads tables and their policies
+  stay in the database with their history but nothing in the app uses them.
+  As it was: the 🔔 Notifications item in the sidebar opened a drawer with an unread badge. Managers
   send a title + message to Everyone, one shift, or one person, and can unsend.
   Staff see only notifications for the whole team, their current shift, or them;
   opening the drawer marks them read. New ones arrive live with a toast.
@@ -668,8 +670,8 @@ B. PHONE LAYOUT (App.vue): any phone-sized screen (max 640px wide, or a short to
    screen in landscape), in the browser or installed, gets only the phone features;
    PCs and tablets keep the full app. Steel top bar (team, name, live dot, sign
    out) and a bottom tab bar (safe-area aware):
-- Staff: Check in · Alerts · Team.
-- Managers: Shifts · Logs · Stats · Attendance · Alerts (send notifications).
+- (Superseded by section 16G: staff Check in · Team · Profile; supervisors
+  Today · Check in · Team · More · Profile; managers Today · Team · More · Profile.)
   The board, extensions and the rest stay PC-only. Check-in is phone-only.
 
 C. CHECK-IN / CHECK-OUT (CheckInView.vue, services/attendanceService.js):
@@ -784,8 +786,66 @@ F. TESTS: 28 (reminder switch: managers only), 29 (deactivation clears the shift
    the phones; reminder internals are not reachable by app users).
 
 --------------------------------------------------------------------------------
+16G. ROLES (STAFF / SUPERVISOR / MANAGER), PHONE APP TABS, NO NOTIFICATIONS
+--------------------------------------------------------------------------------
+A. ROLES (src/config/roles.js, staff_profiles.role):
+- staff: works the board, checks in / out on the phone.
+- supervisor: leads a group. Every manager power (same pages and database rights:
+  is_team_manager() is true for manager and supervisor) AND checks in / out and
+  gets shift reminders like staff.
+- manager: runs the whole team. Every manager power, no check-in / out, no shift
+  reminders (claim_shift_reminders skips role 'manager').
+- Set in Team -> Members (a Staff / Supervisor / Manager picker per person, and a
+  three-way choice when creating an account). rpc create_staff_account and
+  set_staff_role accept 'supervisor'; the role CHECK allows it.
+
+B. PHONE APP TABS (App.vue):
+- Staff: Check in · Team · Profile.
+- Supervisors: Today · Check in · Team · More · Profile.
+- Managers: Today · Team · More · Profile.
+- Profile is now a tab (no longer opened from the top bar). If a role change removes
+  the open tab, the app goes to the first tab.
+- Today (TodayView.vue): live counts for the shifts on now (checked in / expected,
+  late, not in) and, for each shift (on now first, then upcoming, then ended), its
+  people with their state: in since HH:MM (on time / late), done (in - out),
+  due by (start + late rule), not checked in / no check-in, or starts at.
+- More (PhoneMoreView.vue): Shifts, Logs and Statistics, each with a "< More" back
+  bar. The office location map is not shown on the phone (ShiftControlView
+  showOffice=false); it is set on the computer.
+- Check in (CheckInView.vue): under the button, a weekly attendance summary for the
+  work week Monday - Sunday (◀ ▶ for earlier weeks): shifts, on time, late (count
+  and total minutes), hours worked (check-in to check-out), shifts without a
+  check-out, and one row per day (times, late / on time, "No check-in", "—" for
+  days still ahead; today highlighted).
+
+C. NOTIFICATIONS REMOVED: no Notifications item, drawer, Alerts tab, unread badges or
+   pop-up toasts, and no send-push Edge Function in the repository (the deployed one
+   can be deleted in the Supabase dashboard). The shift reminders stay: the switch
+   on each phone is in Profile ("Shift reminders on this phone"), the team switch in
+   Team -> Attendance. Tapping a reminder opens Check in.
+
+D. SHIFTS PAGE: the "+1" next-day marker next to the hours is gone (a shift whose end
+   is before its start still ends the next day). On phones each day's label sits
+   above its two time boxes so 12-hour times show in full.
+
+E. SMALL SCREENS (checked at 320, 360, 375, 390 and 430 px wide and in landscape):
+   Attendance month summary rows become name + four labeled numbers; the month and
+   day pickers and the Logs shift buttons fill the width; statistics shift cards wrap.
+
+F. TESTS: 32 (supervisor role: manager rights, set and created by managers).
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - ROLES, PHONE APP TABS, NO NOTIFICATIONS (re-run supabase_schema.sql):
+- New supervisor role (manager powers + check-in); managers no longer check in or
+  get reminders (section 16G).
+- Phone app: staff Check in · Team · Profile; supervisors Today · Check in · Team ·
+  More · Profile; managers Today · Team · More · Profile. New Today screen and
+  weekly attendance summary on Check in. No office map on the phone.
+- Notifications (send / inbox / badges) removed; shift reminders stay.
+- Shifts page: no "+1"; small-screen layout fixes.
+
 OCTOBER 2026 - PROFILE SETTINGS & TEAM PAGE (re-run supabase_schema.sql):
 - The Team & staff modal is gone. Everyone gets Profile settings (name, username,
   password, phone alerts, sign out); managers get a Team page that combines the

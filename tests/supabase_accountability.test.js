@@ -722,4 +722,28 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     const refreshed = await other.auth.refreshSession();
     assert.ok(refreshed.error, 'the other device is signed out');
   });
+
+  test('32. Supervisors: set by managers, manager rights, and they still check in', async () => {
+    let kate = await mustSignIn(uname('kate'), pw);
+    const kateId = (await kate.auth.getUser()).data.user.id;
+    const bad = await mgrA.rpc('set_staff_role', { p_staff_id: kateId, p_role: 'boss' });
+    assert.match(bad.error?.message || '', /staff, supervisor or manager/);
+    const denied = await kate.rpc('set_attendance_rules', { p_late_after_min: 15 });
+    assert.match(denied.error?.message || '', /Only managers/, 'staff have no manager rights');
+
+    let r = await mgrA.rpc('set_staff_role', { p_staff_id: kateId, p_role: 'supervisor' });
+    assert.equal(r.error, null, r.error?.message);
+    kate = await mustSignIn(uname('kate'), pw);
+    r = await kate.rpc('set_attendance_rules', { p_late_after_min: 15 });
+    assert.equal(r.error, null, 'supervisors have manager rights');
+    const team = new Set((await kate.from('attendance').select('staff_id')).data.map(a => a.staff_id));
+    assert.ok(team.has(staffA1Id), 'supervisors read the whole team\'s attendance');
+
+    const created = await mgrA.rpc('create_staff_account', { p_display_name: 'Sup Sara', p_username: uname('sara'), p_password: pw, p_role: 'supervisor' });
+    assert.equal(created.error, null, created.error?.message);
+    assert.equal(created.data.role, 'supervisor');
+
+    r = await mgrA.rpc('set_staff_role', { p_staff_id: kateId, p_role: 'staff' });
+    assert.equal(r.error, null, r.error?.message);
+  });
 });

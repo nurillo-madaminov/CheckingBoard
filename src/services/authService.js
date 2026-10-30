@@ -2,6 +2,7 @@ import { ref, computed } from 'vue';
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import { setCustomShiftHours } from '../config/shifts';
+import { canManage } from '../config/roles';
 
 /**
  * AUTH & TEAM SERVICE (Supabase Auth + public.staff_profiles)
@@ -59,8 +60,9 @@ export function isAuthenticated() {
   return !!currentStaffUser.value;
 }
 
+// Managers and supervisors
 export function isCurrentUserManager() {
-  return currentStaffUser.value?.role === 'manager';
+  return canManage(currentStaffUser.value?.role);
 }
 
 export function getStaffProfiles() {
@@ -232,7 +234,7 @@ export async function createStaffAccount({ displayName, username, password, role
     p_display_name: (displayName || '').trim(),
     p_username: (username || '').trim().toLowerCase(),
     p_password: password || '',
-    p_role: role === 'manager' ? 'manager' : 'staff'
+    p_role: ['manager', 'supervisor'].includes(role) ? role : 'staff'
   });
   if (error) throw friendlyError(error, 'Failed to create staff account');
   await loadTeamRoster();
