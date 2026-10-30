@@ -35,11 +35,11 @@ function sameSecret(a: string, b: string) {
   return diff === 0;
 }
 
-// "Hey Nick, your shift is about to start. It's time to check in."
+// iPhone shows "Shift reminder from CheckingBoard" / "Hey Nick, your shift is about to start. It's time to check in."
 function messageFor(d: Due, name: string) {
   const hey = name ? `Hey ${name}, your` : 'Hey, your';
   return {
-    title: 'CheckingBoard',
+    title: 'Shift reminder',
     body: d.kind === 'CHECK_IN'
       ? `${hey} shift is about to start. It's time to check in.`
       : `${hey} shift is about to end. It's time to check out.`

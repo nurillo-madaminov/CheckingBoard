@@ -721,10 +721,11 @@ I. TESTS: 24 (late rule), 25 (check-in / out: radius, server time, lateness,
 16F. CHECK-IN / CHECK-OUT REMINDERS
 --------------------------------------------------------------------------------
 A. WHAT STAFF GET:
-- A phone alert titled "CheckingBoard", greeting them by their display name, 2
-  minutes before their shift starts ("Hey Nick, your shift is about to start. It's
-  time to check in.") and 2 minutes before it ends ("Hey Nick, your shift is about
-  to end. It's time to check out."). Tapping it opens the app on Check in.
+- A phone alert titled "Shift reminder" (iPhone shows "Shift reminder from
+  CheckingBoard"), greeting them by their display name, 2 minutes before their
+  shift starts ("Hey Nick, your shift is about to start. It's time to check in.")
+  and 2 minutes before it ends ("Hey Nick, your shift is about to end. It's time
+  to check out."). Tapping it opens the app on Check in.
 - Check-in reminder: only if they have not checked in to that shift run yet.
   Check-out reminder: only if they are checked in to that run and not out yet.
 - Needs phone alerts turned on on that phone (Notifications page) like any push.
