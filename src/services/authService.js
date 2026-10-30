@@ -16,7 +16,7 @@ export const LOGIN_EMAIL_DOMAIN = 'checkingboard.internal';
 
 export const currentStaffUser = ref(null);   // signed-in profile
 export const staffProfiles = ref([]);        // team roster, deactivated members included
-// Deactivated members appear only in Team & staff; every other list uses this
+// Deactivated members appear only in Team -> Members; every other list uses this
 export const activeStaffProfiles = computed(() => staffProfiles.value.filter(p => p.isActive));
 export const currentTeam = ref(null);        // { id, name }
 // True while a saved sign-in can't be confirmed (no connection): the app keeps
@@ -287,6 +287,36 @@ export async function updateMyDisplayName(displayName) {
   if (error) throw friendlyError(error, 'Failed to update name');
   await loadCurrentProfile();
   return currentStaffUser.value;
+}
+
+// Before supabase_schema.sql is re-run the profile functions are missing
+function profileError(error, fallback) {
+  if (/update_my_username|change_my_password|schema cache/i.test(error?.message || '')) {
+    return new Error('This needs the updated database script. Ask your manager to re-run supabase_schema.sql.');
+  }
+  return friendlyError(error, fallback);
+}
+
+/**
+ * Change your own username (also your sign-in name). You stay signed in.
+ */
+export async function updateMyUsername(username) {
+  const { error } = await supabase.rpc('update_my_username', { p_username: (username || '').trim().toLowerCase() });
+  if (error) throw profileError(error, 'Failed to change the username');
+  await loadCurrentProfile();
+  return currentStaffUser.value;
+}
+
+/**
+ * Change your own password after confirming the current one. This device stays
+ * signed in; your other devices are signed out.
+ */
+export async function changeMyPassword(currentPassword, newPassword) {
+  const { error } = await supabase.rpc('change_my_password', {
+    p_current_password: currentPassword || '',
+    p_new_password: newPassword || ''
+  });
+  if (error) throw profileError(error, 'Failed to change the password');
 }
 
 export async function logoutUser() {

@@ -26,7 +26,7 @@ All teams and dispatchers share one Supabase database: accounts, fleet, and the 
    SELECT public.claim_legacy_fleet('your-username');
    ```
 
-Then add staff in **Team & Staff Management** (click your name in the top bar) and give each
+Then add staff in **Team → Members** (sidebar) and give each
 person their username and password.
 
 ---
