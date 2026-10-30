@@ -37,13 +37,17 @@ CREATE TABLE IF NOT EXISTS public.staff_profiles (
     username TEXT UNIQUE,
     email TEXT UNIQUE,
     display_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('staff', 'manager')),
+    role TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('staff', 'supervisor', 'manager')),
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE public.staff_profiles ADD COLUMN IF NOT EXISTS team_id TEXT REFERENCES public.teams(id) ON DELETE SET NULL;
 ALTER TABLE public.staff_profiles ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;
+-- Roles: staff; supervisor = leads a group, has every manager power and checks in / out;
+-- manager = runs the whole team and does not check in / out
+ALTER TABLE public.staff_profiles DROP CONSTRAINT IF EXISTS staff_profiles_role_check;
+ALTER TABLE public.staff_profiles ADD CONSTRAINT staff_profiles_role_check CHECK (role IN ('staff', 'supervisor', 'manager'));
 -- Work shift the manager assigned this person to (see save_shift_schedule)
 ALTER TABLE public.staff_profiles ADD COLUMN IF NOT EXISTS shift_code TEXT
     CHECK (shift_code IN ('MORNING', 'AFTERNOON', 'NIGHT'));
@@ -150,6 +154,7 @@ AS $$
     LIMIT 1
 $$;
 
+-- Manager powers: managers and supervisors (supervisors also check in / out)
 CREATE OR REPLACE FUNCTION public.is_team_manager()
 RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -157,7 +162,7 @@ SET search_path = public, pg_temp
 AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.staff_profiles
-        WHERE id = auth.uid()::text AND is_active AND role = 'manager'
+        WHERE id = auth.uid()::text AND is_active AND role IN ('manager', 'supervisor')
     )
 $$;
 
@@ -549,7 +554,7 @@ BEGIN
 END;
 $$;
 
--- Manager creates a login for a staff member (or another manager) in their own team
+-- Manager (or supervisor) creates a login for a staff member, supervisor or manager in their own team
 CREATE OR REPLACE FUNCTION public.create_staff_account(p_display_name TEXT, p_username TEXT, p_password TEXT, p_role TEXT DEFAULT 'staff')
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER
@@ -557,7 +562,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_team_id TEXT := public.current_team_id();
-    v_role TEXT := CASE WHEN p_role = 'manager' THEN 'manager' ELSE 'staff' END;
+    v_role TEXT := CASE WHEN p_role IN ('manager', 'supervisor') THEN p_role ELSE 'staff' END;
     v_uid UUID;
 BEGIN
     IF NOT public.is_team_manager() THEN
@@ -601,8 +606,8 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-    IF p_role NOT IN ('staff', 'manager') THEN
-        RAISE EXCEPTION 'Role must be staff or manager';
+    IF p_role IS NULL OR p_role NOT IN ('staff', 'supervisor', 'manager') THEN
+        RAISE EXCEPTION 'Role must be staff, supervisor or manager';
     END IF;
     PERFORM public._cb_assert_manages(p_staff_id);
     UPDATE public.staff_profiles SET role = p_role, updated_at = NOW() WHERE id = p_staff_id;
@@ -1633,6 +1638,7 @@ AS $$
         CROSS JOIN LATERAL (VALUES ('CHECK_IN', r.starts), ('CHECK_OUT', r.ends)) AS e(kind, event_at)
         WHERE p.is_active
           AND p.shift_code IS NOT NULL
+          AND p.role <> 'manager'               -- managers don't check in / out
           AND NOW() >= e.event_at - make_interval(mins => greatest(1, least(coalesce(p_lead_min, 2), 30)))
           AND NOW() < e.event_at
           AND CASE e.kind

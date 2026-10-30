@@ -249,6 +249,10 @@ onMounted(load);
   .head { position: static; }
 }
 @media (max-width: 600px) {
+  /* Day picker and shift buttons fill the width */
+  .stepper { flex: 1 1 100%; justify-content: space-between; }
+  .day { flex: 1; min-width: 0; }
+  .seg { display: flex; width: 100%; }
   .counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .count { padding: 10px 12px; }
   .count-num { font-size: 24px; }

@@ -41,7 +41,6 @@
               <input v-model="hoursDraft[shift.code].all.start" type="time" class="input time" :aria-label="`${shift.label} start`" />
               <span class="dash">–</span>
               <input v-model="hoursDraft[shift.code].all.end" type="time" class="input time" :aria-label="`${shift.label} end`" />
-              <span v-if="endsNextDay(hoursDraft[shift.code].all)" class="next-day" title="Ends the next day">+1</span>
             </div>
 
             <template v-else>
@@ -50,7 +49,6 @@
                 <input v-model="hoursDraft[shift.code].days[day.iso].start" type="time" class="input time" :aria-label="`${shift.label} ${day.label} start`" />
                 <span class="dash">–</span>
                 <input v-model="hoursDraft[shift.code].days[day.iso].end" type="time" class="input time" :aria-label="`${shift.label} ${day.label} end`" />
-                <span v-if="endsNextDay(hoursDraft[shift.code].days[day.iso])" class="next-day" title="Ends the next day">+1</span>
               </div>
             </template>
           </div>
@@ -93,15 +91,16 @@
         </span>
         <span v-if="!unassigned.length" class="cb-sub">Every staff member is on a shift.</span>
       </div>
-      <span class="cb-sub small">Actions by unassigned staff are placed by the clock; where shifts overlap, the one that started first counts. A shift ending at or before its start time ends the next day (+1).</span>
+      <span class="cb-sub small">Actions by unassigned staff are placed by the clock; where shifts overlap, the one that started first counts. A shift ending at or before its start time ends the next day.</span>
     </div>
 
     <!-- Managers only (the database rejects staff too) -->
     <OfficeLocationCard
-      v-if="isManager"
+      v-if="isManager && showOffice"
       @saved="emit('office-saved', $event)"
       @error="emit('office-error', $event)"
     />
+    <span v-else-if="isManager" class="cb-sub small">The office location for check-in is set on the computer, on this Shifts page.</span>
   </div>
 </template>
 
@@ -117,6 +116,11 @@ import {
 import { initials } from '../utils/format';
 // Loaded on demand: the map library is only needed here, by managers
 const OfficeLocationCard = defineAsyncComponent(() => import('./OfficeLocationCard.vue'));
+
+defineProps({
+  // The office map is for the computer; the phone app leaves it out
+  showOffice: { type: Boolean, default: true }
+});
 
 const emit = defineEmits(['saved', 'office-saved', 'office-error']);
 
@@ -189,12 +193,6 @@ function togglePerDay(code) {
     WEEKDAYS.forEach(d => { h.days[d.iso] = { ...h.all }; });
   }
   h.perDay = !h.perDay;
-}
-
-function endsNextDay(range) {
-  const start = parseMinutes(range.start);
-  const end = parseMinutes(range.end);
-  return start !== null && end !== null && end < start;
 }
 
 function todayHours(code) {
@@ -336,12 +334,11 @@ onUnmounted(() => clearInterval(clockTimer));
 }
 .link-btn:hover { color: var(--color-accent-900); }
 
-.hours-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto minmax(0, 1fr) 22px; align-items: center; gap: 6px; }
+.hours-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; }
 .hours-row.is-today .day-label { color: var(--color-accent-700); font-weight: 600; }
 .day-label { font-size: 13px; color: var(--color-neutral-800); white-space: nowrap; }
 .time { font-size: 14px; min-width: 0; padding-inline: 6px; background-color: var(--color-bg); }
 .dash { color: var(--color-neutral-600); }
-.next-day { font-size: 11px; font-weight: 600; color: var(--color-accent-700); }
 
 .person { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0; }
 .person-avatar { width: 26px; height: 26px; font-size: 10px; flex-shrink: 0; }
@@ -361,10 +358,11 @@ onUnmounted(() => clearInterval(clockTimer));
 
 @media (max-width: 1400px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
-/* Phones: give the time boxes the room (12-hour clocks show AM / PM too) */
+/* Phones: the day goes above its times, so the time boxes get the full width
+   (12-hour clocks show AM / PM too) */
 @media (max-width: 640px) {
-  .hours-row { grid-template-columns: 56px minmax(0, 1fr) auto minmax(0, 1fr) 16px; gap: 4px; }
-  .day-label { font-size: 12px; }
-  .time { font-size: 13px; padding-inline: 4px; }
+  .hours-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 2px 6px; }
+  .day-label { grid-column: 1 / -1; font-size: 12px; }
+  .time { padding-inline: 6px; }
 }
 </style>

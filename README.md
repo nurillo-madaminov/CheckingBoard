@@ -41,13 +41,14 @@ npm run build      # production build in dist/
 
 Double-clicking `start.bat` also runs the dev server.
 
-## 📱 Phone app & push alerts
+## 📱 Phone app & shift reminders
 
 CheckingBoard installs on phones as an app (Android: **Install app**; iPhone: Safari → Share →
-**Add to Home Screen**). Staff check in and out there; managers see attendance.
+**Add to Home Screen**). Staff and supervisors check in and out there; managers and supervisors
+see who is in today.
 
 Check-in works as soon as `supabase_schema.sql` has been re-run and a manager has set the office on
-the Shifts page. **Phone alerts** (push notifications) need a one-time setup:
+the Shifts page. **Shift reminders** (phone push alerts) need a one-time setup:
 
 1. **Keys.** The public key goes in `.env` (and on your host, e.g. Vercel → Settings → Environment
    Variables, then redeploy):
@@ -62,33 +63,25 @@ the Shifts page. **Phone alerts** (push notifications) need a one-time setup:
    ```
    To make a new pair: `npx web-push generate-vapid-keys`.
 2. **Upload the secrets and deploy the function** (Supabase CLI; sign in once with your Supabase
-   account, `your-project-ref` is in the project URL):
+   account, `your-project-ref` is in the project URL). The function is called by the database,
+   not a user, hence `--no-verify-jwt`:
    ```bash
    npx supabase login
    npx supabase link --project-ref your-project-ref
    npx supabase secrets set --env-file supabase/.env.push
-   npx supabase functions deploy send-push
-   ```
-
-Without these steps everything else works; only the phone pop-ups are missing.
-
-### ⏰ Shift reminders (check in / check out)
-
-Once phone alerts work, staff can get a reminder 2 minutes before their shift starts and ends.
-Managers switch it on or off on the **Attendance** page. It needs one more function and a
-one-time schedule:
-
-1. Deploy the function (it is called by the database, not a user, hence `--no-verify-jwt`):
-   ```bash
    npx supabase functions deploy shift-reminders --no-verify-jwt
    ```
-2. In the Supabase **SQL Editor** (use your project URL):
+3. **Schedule it** in the Supabase **SQL Editor** (use your project URL):
    ```sql
    SELECT public.setup_shift_reminders('https://your-project-ref.supabase.co');
    ```
    This turns on `pg_cron` and `pg_net`, creates a private secret and calls the function every
    minute. If it says an extension is not available, enable **pg_cron** and **pg_net** under
    Database → Extensions and run it again. To stop it: `SELECT cron.unschedule('cb-shift-reminders');`
+
+Reminders go 2 minutes before each shift starts and ends to staff and supervisors who turned them
+on in **Profile** on their phone. Managers switch them on or off in **Team → Attendance**.
+Without these steps everything else works; only the reminders are missing.
 
 ## ✅ Tests
 

@@ -1,13 +1,12 @@
 import { supabase } from './supabaseClient';
 
 /**
- * PHONE PUSH ALERTS
+ * PHONE PUSH ALERTS (shift reminders)
  * - A member turns alerts on (asks the browser for permission, then saves this
  *   browser's push subscription with rpc save_push_subscription).
- * - After a manager sends a notification, the app asks the send-push Edge
- *   Function to deliver it to the right phones (the function checks the caller
- *   is a manager and reads the subscriptions with the service role).
- * Needs VITE_VAPID_PUBLIC_KEY (build env) and the deployed send-push function.
+ * - The shift-reminders Edge Function sends the check-in / check-out reminders
+ *   to those subscriptions.
+ * Needs VITE_VAPID_PUBLIC_KEY (build env) and the deployed shift-reminders function.
  */
 const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY || '').trim();
 
@@ -104,27 +103,4 @@ export async function forgetThisDevice() {
   } catch (err) {
     console.warn('Could not remove the push subscription:', err);
   }
-}
-
-/**
- * Ask the send-push Edge Function to deliver a notification to phones.
- * Returns { sent, failed } or throws a message that says what is missing.
- */
-export async function sendPushFor(notificationId) {
-  if (!pushConfigured) return { sent: 0, failed: 0, skipped: true };
-  const { data, error } = await supabase.functions.invoke('send-push', { body: { notification_id: notificationId } });
-  if (error) {
-    let detail = error.message || '';
-    try {
-      // The function answers { error }; Supabase's gateway answers { msg } or { message }
-      const body = await error.context?.json();
-      detail = body?.error || body?.msg || body?.message || detail;
-    } catch (e) {
-      // Not a JSON error body (for example the function is not deployed)
-    }
-    throw new Error(/not found|404|Failed to send a request/i.test(detail)
-      ? 'the send-push function is not deployed yet'
-      : detail);
-  }
-  return data || { sent: 0, failed: 0 };
 }

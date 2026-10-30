@@ -50,10 +50,10 @@
           <span class="cb-avatar avatar">{{ initials(s.name) }}</span>
           <span class="cb-ellipsis">{{ s.name }}</span>
         </div>
-        <div class="num">{{ s.shifts }}</div>
-        <div :class="['num', { 'is-signal': s.late }]">{{ s.late }}</div>
-        <div :class="['num', { 'is-signal': s.late }]">{{ s.late ? formatMinutesSpan(s.lateMin) : '—' }}</div>
-        <div class="num">{{ s.missing || '—' }}</div>
+        <div class="num" data-label="Shifts">{{ s.shifts }}</div>
+        <div :class="['num', { 'is-signal': s.late }]" data-label="Late">{{ s.late }}</div>
+        <div :class="['num', { 'is-signal': s.late }]" data-label="Late total">{{ s.late ? formatMinutesSpan(s.lateMin) : '—' }}</div>
+        <div class="num" data-label="No check-out">{{ s.missing || '—' }}</div>
       </div>
       <div v-if="!summary.length && !isLoading" class="empty">No check-ins in {{ monthLabel }}.</div>
     </div>
@@ -288,10 +288,19 @@ onMounted(() => {
 }
 /* Phones: each check-in becomes a small card */
 @media (max-width: 640px) {
-  .sum-row { grid-template-columns: minmax(0, 1fr) 40px 34px 56px 52px; padding: 0 10px; gap: 6px; }
-  .who { gap: 8px; }
+  /* Controls take the full width; the month picker spans the screen */
+  .stepper { flex: 1 1 100%; justify-content: space-between; }
+  .staff-select { flex: 1 1 100%; }
+  /* Month summary: the name on its own line, the four numbers labeled below it */
+  .sum-head { display: none; }
+  .sum-row { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 10px 12px; gap: 6px 8px; }
+  .sum-row > .who { grid-column: 1 / -1; gap: 8px; }
+  .sum-row > .num { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+  .sum-row > .num::before {
+    content: attr(data-label); font-family: var(--font-body); font-size: 10px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--color-neutral-600);
+  }
   .avatar { width: 24px; height: 24px; }
-  .sum-head { font-size: 9px; letter-spacing: 0.04em; }
   .records { overflow-x: visible; }
   .rec-head { display: none; }
   .rec-row {

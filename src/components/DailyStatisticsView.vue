@@ -235,7 +235,8 @@ onMounted(() => {
 
 .shift-cards { display: flex; flex-direction: column; gap: 14px; }
 .shift-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-.shift-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.shift-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; }
+.shift-top > span:last-child { white-space: nowrap; }
 .shift-name { font-family: var(--font-heading); font-weight: 600; font-size: 18px; text-transform: uppercase; }
 .shift-hours { font-family: var(--font-body); font-weight: 400; font-size: 12px; color: var(--color-neutral-700); text-transform: none; }
 .shift-total { font-size: 26px; }

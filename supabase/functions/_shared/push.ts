@@ -1,5 +1,5 @@
 /**
- * Shared by the Edge Functions that send phone alerts (send-push, shift-reminders):
+ * Used by the shift-reminders Edge Function (phone alerts):
  * the Supabase server client and Web Push delivery to members' saved subscriptions.
  *
  * Secrets (supabase secrets set ...): VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT

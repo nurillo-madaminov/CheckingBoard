@@ -58,20 +58,45 @@
       <span v-else>Your manager hasn't set the office location yet, so check-in is off.</span>
     </div>
 
-    <!-- Recent days -->
-    <section class="recent">
-      <span class="cb-label">Your recent shifts</span>
-      <div v-if="!records.length" class="cb-panel empty">No check-ins yet.</div>
-      <div v-else class="cb-panel recent-list">
-        <div v-for="r in records.slice(0, 10)" :key="r.id" :class="['day', { 'is-late': r.is_late }]">
+    <!-- Weekly attendance summary (Monday - Sunday work days) -->
+    <section class="week">
+      <div class="week-head">
+        <button type="button" class="btn btn-ghost btn-icon week-step" aria-label="Previous week" @click="weekOffset -= 1">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+        <div class="week-title">
+          <span class="cb-label">{{ weekOffset === 0 ? 'This week' : weekOffset === -1 ? 'Last week' : 'Week' }}</span>
+          <span class="week-range">{{ weekRangeLabel }}</span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon week-step" aria-label="Next week" :disabled="weekOffset >= 0" @click="weekOffset += 1">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+      </div>
+
+      <div class="cb-panel week-stats">
+        <div class="stat"><span class="stat-num">{{ weekStats.shifts }}</span><span class="stat-label">Shifts</span></div>
+        <div class="stat"><span class="stat-num">{{ weekStats.onTime }}</span><span class="stat-label">On time</span></div>
+        <div :class="['stat', { 'is-late': weekStats.late }]">
+          <span class="stat-num">{{ weekStats.late }}</span>
+          <span class="stat-label">Late{{ weekStats.late ? ` · ${formatMinutesSpan(weekStats.lateMin)}` : '' }}</span>
+        </div>
+        <div class="stat"><span class="stat-num">{{ weekStats.hours }}</span><span class="stat-label">Worked</span></div>
+      </div>
+      <span v-if="weekStats.missing" class="cb-sub missing">{{ weekStats.missing }} shift{{ weekStats.missing === 1 ? '' : 's' }} without a check-out</span>
+
+      <div class="cb-panel week-days">
+        <div v-for="d in weekDays" :key="d.date" :class="['day', { 'is-late': d.late, 'is-today': d.isToday }]">
           <div class="day-left">
-            <span class="day-date">{{ formatWorkDayShort(r.shift_date) }}</span>
-            <span class="day-shift">{{ getShiftConfig(r.shift_code).label }}</span>
+            <span class="day-date">{{ formatWorkDayShort(d.date) }}<template v-if="d.isToday"> · Today</template></span>
+            <span v-if="d.records.length" class="day-shift">{{ d.records.map(r => getShiftConfig(r.shift_code).label).join(', ') }}</span>
           </div>
           <div class="day-right">
-            <span class="day-times">{{ formatTashkentClock(r.check_in_at) }} – {{ r.check_out_at ? formatTashkentClock(r.check_out_at) : (isOpen(r) ? 'now' : 'no check-out') }}</span>
-            <span v-if="r.is_late" class="late-tag">Late {{ formatMinutesSpan(r.late_min) }}</span>
-            <span v-else class="ok-tag">On time</span>
+            <template v-if="d.records.length">
+              <span v-for="r in d.records" :key="r.id" class="day-times">{{ formatTashkentClock(r.check_in_at) }} – {{ r.check_out_at ? formatTashkentClock(r.check_out_at) : (isOpen(r) ? 'now' : 'no check-out') }}</span>
+              <span v-if="d.late" class="late-tag">Late {{ formatMinutesSpan(d.lateMin) }}</span>
+              <span v-else class="ok-tag">On time</span>
+            </template>
+            <span v-else class="day-none">{{ d.future ? '—' : 'No check-in' }}</span>
           </div>
         </div>
       </div>
@@ -86,7 +111,7 @@ import {
 } from '../services/attendanceService';
 import { currentStaffUser, staffProfiles, loadTeamRoster, loadShiftHours } from '../services/authService';
 import {
-  placeShift, shiftHours, getShiftConfig, addDays, currentWorkDay, clockTashkent, clockEastern,
+  placeShift, shiftHours, getShiftConfig, addDays, currentWorkDay, isoWeekday, clockTashkent, clockEastern,
   formatTashkentClock, formatWorkDayShort
 } from '../config/shifts';
 
@@ -101,6 +126,9 @@ const rules = ref(null);
 const lateAfterMin = computed(() => rules.value?.lateAfterMin ?? 15);
 const officeName = computed(() => rules.value?.officeName || 'the office');
 const records = ref([]);
+// 0 = this week, -1 = last week, ...
+const weekOffset = ref(0);
+const weekRecords = ref([]);
 const busy = ref(false);
 const result = ref(null); // { kind: 'ok' | 'warn' | 'error' | 'working', title, text }
 let timer = null;
@@ -197,10 +225,10 @@ async function act() {
     } else {
       result.value = { kind: 'ok', title: `Checked in at ${formatTashkentClock(row.check_in_at)} · on time`, text: `${meters} m from ${officeName.value}.` };
     }
-    await loadRecords();
+    await Promise.all([loadRecords(), loadWeek()]);
   } catch (err) {
     result.value = { kind: 'error', title: checkingOut ? 'Not checked out' : 'Not checked in', text: err.message };
-    await loadRecords();
+    await Promise.all([loadRecords(), loadWeek()]);
   } finally {
     busy.value = false;
   }
@@ -216,20 +244,72 @@ async function loadRecords() {
   }
 }
 
+// ---------------- weekly summary ----------------
+const weekStart = computed(() => {
+  const today = currentWorkDay(now.value);
+  return addDays(today, 1 - isoWeekday(today) + 7 * weekOffset.value);
+});
+const weekEnd = computed(() => addDays(weekStart.value, 6));
+const weekRangeLabel = computed(() => `${formatWorkDayShort(weekStart.value)} – ${formatWorkDayShort(weekEnd.value)}`);
+
+const weekDays = computed(() => {
+  const today = currentWorkDay(now.value);
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = addDays(weekStart.value, i);
+    const dayRecords = weekRecords.value.filter(r => r.shift_date === date);
+    return {
+      date,
+      records: dayRecords,
+      isToday: date === today,
+      future: date > today,
+      late: dayRecords.some(r => r.is_late),
+      lateMin: dayRecords.reduce((m, r) => m + (r.is_late ? r.late_min : 0), 0)
+    };
+  });
+});
+
+const weekStats = computed(() => {
+  const list = weekRecords.value;
+  const late = list.filter(r => r.is_late);
+  const workedMin = list.reduce((m, r) => (r.check_out_at
+    ? m + Math.max(0, (Date.parse(r.check_out_at) - Date.parse(r.check_in_at)) / 60000)
+    : m), 0);
+  return {
+    shifts: list.length,
+    onTime: list.length - late.length,
+    late: late.length,
+    lateMin: late.reduce((m, r) => m + r.late_min, 0),
+    hours: formatMinutesSpan(workedMin),
+    missing: list.filter(r => !r.check_out_at && !isOpen(r)).length
+  };
+});
+
+let weekSeq = 0;
+async function loadWeek() {
+  const seq = ++weekSeq;
+  try {
+    const list = await fetchAttendance({ fromDate: weekStart.value, toDate: weekEnd.value, staffId: currentStaffUser.value?.id, limit: 50 });
+    if (seq === weekSeq) weekRecords.value = list;
+  } catch (err) {
+    if (seq === weekSeq) result.value = { kind: 'error', title: 'Could not load your week', text: err.message };
+  }
+}
+
 async function loadAll() {
   try {
     rules.value = await fetchAttendanceRules();
   } catch (err) {
     result.value = { kind: 'error', title: 'Could not load check-in', text: err.message };
   }
-  await loadRecords();
+  await Promise.all([loadRecords(), loadWeek()]);
 }
 
 const todayLabel = computed(() => now.value.toLocaleDateString('en-US', { timeZone: 'Asia/Tashkent', weekday: 'short', month: 'short', day: 'numeric' }));
 const clockTas = computed(() => clockTashkent(now.value));
 const clockEt = computed(() => clockEastern(now.value));
 
-watch(() => props.refreshKey, loadRecords);
+watch(() => props.refreshKey, () => Promise.all([loadRecords(), loadWeek()]));
+watch(weekStart, loadWeek);
 
 onMounted(() => {
   timer = setInterval(() => { now.value = new Date(); }, 10000);
@@ -301,9 +381,21 @@ onUnmounted(() => clearInterval(timer));
 .place { display: flex; align-items: center; gap: 6px; justify-content: center; text-align: center; }
 .place svg { flex-shrink: 0; color: var(--color-accent-700); }
 
-.recent { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
-.empty { padding: 20px; text-align: center; font-size: 13px; color: var(--color-neutral-700); }
-.recent-list { display: flex; flex-direction: column; }
+.week { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.week-head { display: flex; align-items: center; gap: 6px; }
+.week-step { width: 40px; height: 40px; color: var(--color-text); flex-shrink: 0; }
+.week-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.week-range { font-family: var(--font-heading); font-size: 17px; }
+.week-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 4px; border-left: 1px solid var(--color-divider); }
+.stat:first-child { border-left: 0; }
+.stat-num { font-family: var(--font-heading); font-weight: 600; font-size: 24px; line-height: 1; }
+.stat-label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-neutral-700); text-align: center; }
+.stat.is-late .stat-num, .stat.is-late .stat-label { color: var(--color-signal); }
+.missing { text-align: center; font-size: 12px; }
+.week-days { display: flex; flex-direction: column; }
+.day.is-today { background: var(--color-accent-100); }
+.day-none { font-size: 13px; color: var(--color-neutral-600); }
 .day { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--color-hairline); }
 .day:first-child { border-top: 0; }
 .day.is-late { box-shadow: inset 3px 0 0 var(--color-signal); background: color-mix(in srgb, var(--color-signal) 5%, transparent); }

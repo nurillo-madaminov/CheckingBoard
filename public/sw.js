@@ -1,6 +1,6 @@
 /*
- * CheckingBoard service worker: makes the app installable, shows push alerts
- * sent by the send-push Edge Function, and keeps the last good copy of the app
+ * CheckingBoard service worker: makes the app installable, shows the shift
+ * reminders sent by the shift-reminders Edge Function, and keeps the last good copy of the app
  * so it still opens on a weak connection. Data always comes live from Supabase.
  */
 const SHELL_CACHE = 'cb-shell-v1';
@@ -60,16 +60,15 @@ self.addEventListener('push', (event) => {
     icon: '/icons/icon-192.png',
     badge: '/icons/badge-96.png',
     tag: data.tag || undefined,
-    data: { url: data.url || '/?view=notifications' }
+    data: { url: data.url || '/?view=checkin' }
   }));
 });
 
-// Tapping an alert opens (or focuses) the app on the page in its link
-// (?view=notifications for a manager's notification, ?view=checkin for a shift reminder)
+// Tapping a reminder opens (or focuses) the app on the page in its link (?view=checkin)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || '/?view=notifications', self.location.origin);
-  const view = target.searchParams.get('view') || 'notifications';
+  const target = new URL(event.notification.data?.url || '/?view=checkin', self.location.origin);
+  const view = target.searchParams.get('view') || 'checkin';
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
