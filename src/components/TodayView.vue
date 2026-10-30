@@ -95,28 +95,25 @@ function personState(person, run, phase) {
   return { state: 'missing', main: phase === 'ended' ? 'No check-in' : 'Not checked in', tag: 'Missing', lateTag: true, missing: true };
 }
 
-const groups = computed(() => {
-  const list = SHIFTS.map(s => {
-    const run = placeShift(now.value, s.code);
-    const phase = now.value < run.start ? 'soon' : now.value < run.end ? 'on' : 'ended';
-    const minsTo = Math.max(0, Math.round((run.start - now.value) / 60000));
-    const minsLeft = Math.max(0, Math.round((run.end - now.value) / 60000));
-    const people = roster.value
-      .filter(p => p.shiftCode === s.code)
-      .map(p => ({ id: p.id, name: p.displayName, role: roleLabel(p.role), ...personState(p, run, phase) }));
-    return {
-      code: s.code,
-      label: s.label,
-      run,
-      phase,
-      phaseLabel: phase === 'on' ? `On now · ${formatMinutesSpan(minsLeft)} left` : phase === 'soon' ? `Starts in ${formatMinutesSpan(minsTo)}` : 'Ended',
-      hours: shiftHours(s.code, run.day).tashkent,
-      people
-    };
-  });
-  const rank = { on: 0, soon: 1, ended: 2 };
-  return list.sort((a, b) => (rank[a.phase] - rank[b.phase]) || (a.run.start - b.run.start));
-});
+// Always Morning, Afternoon, Night (the order of SHIFTS), whichever is on now
+const groups = computed(() => SHIFTS.map(s => {
+  const run = placeShift(now.value, s.code);
+  const phase = now.value < run.start ? 'soon' : now.value < run.end ? 'on' : 'ended';
+  const minsTo = Math.max(0, Math.round((run.start - now.value) / 60000));
+  const minsLeft = Math.max(0, Math.round((run.end - now.value) / 60000));
+  const people = roster.value
+    .filter(p => p.shiftCode === s.code)
+    .map(p => ({ id: p.id, name: p.displayName, role: roleLabel(p.role), ...personState(p, run, phase) }));
+  return {
+    code: s.code,
+    label: s.label,
+    run,
+    phase,
+    phaseLabel: phase === 'on' ? `On now · ${formatMinutesSpan(minsLeft)} left` : phase === 'soon' ? `Starts in ${formatMinutesSpan(minsTo)}` : 'Ended',
+    hours: shiftHours(s.code, run.day).tashkent,
+    people
+  };
+}));
 
 // Counts for the shifts on duty right now
 const totals = computed(() => {

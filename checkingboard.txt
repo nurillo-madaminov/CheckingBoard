@@ -806,7 +806,7 @@ B. PHONE APP TABS (App.vue):
 - Profile is now a tab (no longer opened from the top bar). If a role change removes
   the open tab, the app goes to the first tab.
 - Today (TodayView.vue): live counts for the shifts on now (checked in / expected,
-  late, not in) and, for each shift (on now first, then upcoming, then ended), its
+  late, not in) and, for each shift (always Morning, Afternoon, Night), its
   people with their state: in since HH:MM (on time / late), done (in - out),
   due by (start + late rule), not checked in / no check-in, or starts at.
 - More (PhoneMoreView.vue): Shifts, Logs and Statistics, each with a "< More" back
