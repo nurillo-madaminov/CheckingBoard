@@ -1,6 +1,6 @@
 /**
  * shift-reminders: phone alerts 2 minutes before a shift starts ("check in") and
- * ends ("check out").
+ * ends ("check out"), addressed to each person by name.
  *
  * Called every minute by pg_cron (see setup_shift_reminders in supabase_schema.sql):
  *   POST {}   with header x-cron-secret = public.cb_cron_config.secret
@@ -16,7 +16,6 @@
 import { corsHeaders, reply, pushSetup, pushToStaff } from '../_shared/push.ts';
 
 const LEAD_MIN = 2;
-const SHIFT_LABELS: Record<string, string> = { MORNING: 'Morning', AFTERNOON: 'Afternoon', NIGHT: 'Night' };
 
 interface Due {
   staff_id: string;
@@ -36,16 +35,15 @@ function sameSecret(a: string, b: string) {
   return diff === 0;
 }
 
-function tashkentClock(iso: string) {
-  return new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
-}
-
-function messageFor(d: Due) {
-  const shift = SHIFT_LABELS[d.shift_code] || d.shift_code;
-  const at = tashkentClock(d.event_at);
-  return d.kind === 'CHECK_IN'
-    ? { title: 'Check in now', body: `Your ${shift} shift starts at ${at} (Tashkent). Open CheckingBoard and check in.` }
-    : { title: 'Check out before you leave', body: `Your ${shift} shift ends at ${at} (Tashkent). Open CheckingBoard and check out.` };
+// "Hey Nick, your shift is about to start. It's time to check in."
+function messageFor(d: Due, name: string) {
+  const hey = name ? `Hey ${name}, your` : 'Hey, your';
+  return {
+    title: 'CheckingBoard',
+    body: d.kind === 'CHECK_IN'
+      ? `${hey} shift is about to start. It's time to check in.`
+      : `${hey} shift is about to end. It's time to check out.`
+  };
 }
 
 Deno.serve(async (req) => {
@@ -71,19 +69,21 @@ Deno.serve(async (req) => {
     if (error) throw error;
     const due = (data || []) as Due[];
 
-    // Everyone with the same reminder gets the same alert: one send per group
-    const groups = new Map<string, Due[]>();
-    for (const d of due) {
-      const key = `${d.team_id}|${d.kind}|${d.shift_code}|${d.event_at}`;
-      groups.set(key, [...(groups.get(key) || []), d]);
-    }
-
     const total = { reminders: due.length, sent: 0, failed: 0, removed: 0 };
-    for (const list of groups.values()) {
-      const first = list[0];
-      const r = await pushToStaff(admin, first.team_id, list.map(d => d.staff_id), {
-        ...messageFor(first),
-        tag: `${first.kind}-${first.shift_code}-${first.event_at}`,
+    if (!due.length) return reply(total);
+
+    // Each alert greets its person by their display name
+    const { data: people, error: peopleError } = await admin
+      .from('staff_profiles')
+      .select('id, display_name')
+      .in('id', due.map(d => d.staff_id));
+    if (peopleError) throw peopleError;
+    const names = new Map((people || []).map(p => [p.id, (p.display_name || '').trim()]));
+
+    for (const d of due) {
+      const r = await pushToStaff(admin, d.team_id, [d.staff_id], {
+        ...messageFor(d, names.get(d.staff_id) || ''),
+        tag: `${d.kind}-${d.shift_code}-${d.event_at}`,
         url: '/?view=checkin'
       });
       total.sent += r.sent;

@@ -721,9 +721,10 @@ I. TESTS: 24 (late rule), 25 (check-in / out: radius, server time, lateness,
 16F. CHECK-IN / CHECK-OUT REMINDERS
 --------------------------------------------------------------------------------
 A. WHAT STAFF GET:
-- A phone alert 2 minutes before their shift starts ("Check in now · Your Morning
-  shift starts at 07:00 (Tashkent)") and 2 minutes before it ends ("Check out before
-  you leave"). Tapping it opens the app on Check in.
+- A phone alert titled "CheckingBoard", greeting them by their display name, 2
+  minutes before their shift starts ("Hey Nick, your shift is about to start. It's
+  time to check in.") and 2 minutes before it ends ("Hey Nick, your shift is about
+  to end. It's time to check out."). Tapping it opens the app on Check in.
 - Check-in reminder: only if they have not checked in to that shift run yet.
   Check-out reminder: only if they are checked in to that run and not out yet.
 - Needs phone alerts turned on on that phone (Notifications page) like any push.
@@ -741,9 +742,9 @@ C. HOW IT RUNS (no app needs to be open):
   on, whose shift start / end (team hours via cb_shift_run, runs starting yesterday,
   today or tomorrow) is less than 2 minutes away. Each reminder is recorded in
   shift_reminders_sent (staff, CHECK_IN / CHECK_OUT, event time) and returned once;
-  rows older than 2 days are cleared. The function sends one Web Push per group
-  (team + kind + shift + time) through supabase/functions/_shared/push.ts, which
-  send-push uses too.
+  rows older than 2 days are cleared. The function looks up each person's display
+  name and sends them their own Web Push through supabase/functions/_shared/push.ts,
+  which send-push uses too.
 
 D. DATABASE (supabase_schema.sql section 7E, safe to re-run):
 - teams.shift_reminders_enabled (default true); tables shift_reminders_sent and
