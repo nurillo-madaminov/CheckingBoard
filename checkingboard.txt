@@ -416,8 +416,16 @@ D. TEAM & STAFF MANAGEMENT MODAL (`StaffSwitchModal.vue`, top bar user pill):
   check-in rows keep their name snapshot, and team / shift totals still count them.
 - There is no "switch user" button: with real logins you sign in as yourself.
 
-E. SIGN OUT:
-- "Sign Out" in the top bar or the modal ends the Supabase session.
+E. SIGN OUT & STAYING SIGNED IN:
+- "Sign Out" in the top bar or the modal ends the Supabase session on THIS device
+  only (signOut scope 'local'); the person stays signed in on their other devices.
+- Nothing else signs a person out in the app. A saved sign-in that can't be
+  confirmed when the app opens (no connection, server not answering) shows
+  "Reconnecting to CheckingBoard…" with a Sign out button and keeps retrying (and
+  retries at once when the connection comes back) instead of showing the login.
+- The login screen appears only when Supabase rejects the saved sign-in (revoked:
+  password reset, deactivation, or Auth session limits set in the dashboard), the
+  account is deactivated, or the person signs out.
 
 --------------------------------------------------------------------------------
 16. ACTION-ONLY LOGS, SHIFTS & MANAGER PAGES (supersedes parts of section 14)
@@ -759,6 +767,12 @@ F. TESTS: 28 (reminder switch: managers only), 29 (deactivation clears the shift
 --------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - NO SURPRISE SIGN-OUTS:
+- Sign out now ends the session on this device only (it used to sign the person
+  out on every device, so their phone or other browser dropped to the login later).
+- Opening the app with no connection keeps the saved sign-in and retries
+  ("Reconnecting…") instead of showing the login screen (section 15 E).
+
 OCTOBER 2026 - SHIFT REMINDERS & DEACTIVATED STAFF (re-run supabase_schema.sql):
 - Phone reminders 2 minutes before each shift starts (check in) and ends (check
   out); managers turn them on / off on the Attendance page (section 16F). Needs the

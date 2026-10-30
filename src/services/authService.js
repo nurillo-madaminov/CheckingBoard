@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import { setCustomShiftHours } from '../config/shifts';
 
@@ -18,6 +19,9 @@ export const staffProfiles = ref([]);        // team roster, deactivated members
 // Deactivated members appear only in Team & staff; every other list uses this
 export const activeStaffProfiles = computed(() => staffProfiles.value.filter(p => p.isActive));
 export const currentTeam = ref(null);        // { id, name }
+// True while a saved sign-in can't be confirmed (no connection): the app keeps
+// retrying instead of showing the login screen
+export const sessionReconnecting = ref(false);
 
 export function usernameToEmail(username) {
   const clean = (username || '').trim().toLowerCase();
@@ -67,14 +71,26 @@ export function getTeams() {
   return currentTeam.value ? [currentTeam.value] : [];
 }
 
+// The sign-in is still saved but couldn't be confirmed right now (network, server)
+function transientError(error, fallback) {
+  const err = friendlyError(error, fallback);
+  err.transient = true;
+  return err;
+}
+
 /**
  * Load the signed-in user's profile, team and roster. Signs out (and throws)
- * if the login has no active profile.
+ * if the login has no active profile. Throws an error marked `transient` when
+ * the saved sign-in can't be checked right now; that is not a sign-out.
  */
 export async function loadCurrentProfile() {
-  const { data: sessionData } = await supabase.auth.getSession();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   const uid = sessionData?.session?.user?.id;
   if (!uid) {
+    // An expired token whose refresh failed for lack of connection is still saved
+    if (sessionError && isAuthRetryableFetchError(sessionError)) {
+      throw transientError(sessionError, 'Cannot reach the team database');
+    }
     currentStaffUser.value = null;
     return null;
   }
@@ -85,9 +101,9 @@ export async function loadCurrentProfile() {
     .eq('id', uid)
     .maybeSingle();
 
-  if (error) throw friendlyError(error, 'Could not load your profile');
+  if (error) throw transientError(error, 'Could not load your profile');
   if (!data || !data.is_active) {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
     currentStaffUser.value = null;
     throw new Error('Your account has been deactivated. Please contact your manager.');
   }
@@ -130,16 +146,50 @@ export async function loadTeamRoster() {
   return staffProfiles.value;
 }
 
+// Restoring a saved sign-in: retried until it is confirmed, rejected or the user signs out
+let restoreCancelled = false;
+let wakeRestore = null;
+
+function waitBeforeRetry(attempt) {
+  return new Promise(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', done);
+      wakeRestore = null;
+      resolve();
+    };
+    const timer = setTimeout(done, Math.min(15000, 1000 * 2 ** attempt));
+    window.addEventListener('online', done);
+    wakeRestore = done;
+  });
+}
+
 /**
  * Restore an existing session on page load. Returns the profile or null.
+ * A saved sign-in that can't be checked right now (no connection) is retried,
+ * never treated as signed out; only Supabase rejecting it, a deactivated
+ * account or the Sign out button leads to the login screen.
  */
 export async function initAuth() {
   if (!supabase) return null;
+  restoreCancelled = false;
   try {
-    return await loadCurrentProfile();
-  } catch (err) {
-    console.warn('Session restore failed:', err.message);
+    for (let attempt = 0; !restoreCancelled; attempt += 1) {
+      try {
+        return await loadCurrentProfile();
+      } catch (err) {
+        if (!err.transient) {
+          console.warn('Session restore failed:', err.message);
+          return null;
+        }
+        console.warn('Session not confirmed yet, retrying:', err.message);
+        sessionReconnecting.value = true;
+        await waitBeforeRetry(attempt);
+      }
+    }
     return null;
+  } finally {
+    sessionReconnecting.value = false;
   }
 }
 
@@ -240,13 +290,17 @@ export async function updateMyDisplayName(displayName) {
 }
 
 export async function logoutUser() {
+  restoreCancelled = true;
+  wakeRestore?.();
   currentStaffUser.value = null;
   staffProfiles.value = [];
   currentTeam.value = null;
   setCustomShiftHours([]);
   if (supabase) {
     try {
-      await supabase.auth.signOut();
+      // This device only: the default ('global') would also sign the person out on
+      // their other devices, which then looks like a logout out of nowhere
+      await supabase.auth.signOut({ scope: 'local' });
     } catch (e) {
       console.warn('Sign out error:', e);
     }
