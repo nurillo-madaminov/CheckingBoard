@@ -678,6 +678,75 @@ BEGIN
 END;
 $$;
 
+-- Any member changes their own username, which is also their sign-in name
+-- (<username>@checkingboard.internal); they stay signed in
+CREATE OR REPLACE FUNCTION public.update_my_username(p_username TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_uid TEXT := auth.uid()::text;
+    v_username TEXT := lower(trim(coalesce(p_username, '')));
+    v_email TEXT := public.login_email(p_username);
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.staff_profiles WHERE id = v_uid AND is_active) THEN
+        RAISE EXCEPTION 'Your account is not active' USING ERRCODE = '42501';
+    END IF;
+    IF v_username !~ '^[a-z0-9][a-z0-9._-]{2,31}$' THEN
+        RAISE EXCEPTION 'Username must be 3-32 characters: letters, numbers, dot, dash or underscore';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.staff_profiles WHERE lower(username) = v_username AND id <> v_uid)
+       OR EXISTS (SELECT 1 FROM auth.users WHERE email = v_email AND id::text <> v_uid) THEN
+        RAISE EXCEPTION 'Username is already taken';
+    END IF;
+
+    UPDATE public.staff_profiles SET username = v_username, email = v_email, updated_at = NOW() WHERE id = v_uid;
+    UPDATE auth.users
+    SET email = v_email,
+        raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('username', v_username),
+        updated_at = NOW()
+    WHERE id::text = v_uid;
+    UPDATE auth.identities
+    SET identity_data = identity_data || jsonb_build_object('email', v_email), updated_at = NOW()
+    WHERE user_id::text = v_uid AND provider = 'email';
+    RETURN v_username;
+END;
+$$;
+
+-- Any member changes their own password after confirming the current one.
+-- This device stays signed in; their other devices are signed out.
+CREATE OR REPLACE FUNCTION public.change_my_password(p_current_password TEXT, p_new_password TEXT)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+AS $$
+DECLARE
+    v_uid UUID := auth.uid();
+    v_hash TEXT;
+    v_session TEXT := auth.jwt() ->> 'session_id';
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.staff_profiles WHERE id = v_uid::text AND is_active) THEN
+        RAISE EXCEPTION 'Your account is not active' USING ERRCODE = '42501';
+    END IF;
+    IF length(coalesce(p_new_password, '')) < 6 THEN
+        RAISE EXCEPTION 'New password must be at least 6 characters';
+    END IF;
+    SELECT encrypted_password INTO v_hash FROM auth.users WHERE id = v_uid;
+    IF coalesce(v_hash, '') = '' OR v_hash <> crypt(coalesce(p_current_password, ''), v_hash) THEN
+        RAISE EXCEPTION 'Your current password is not correct';
+    END IF;
+
+    UPDATE auth.users
+    SET encrypted_password = crypt(p_new_password, gen_salt('bf')), updated_at = NOW()
+    WHERE id = v_uid;
+    -- Only when this session is known, so this device is never signed out by mistake
+    IF v_session IS NOT NULL THEN
+        DELETE FROM auth.sessions WHERE user_id = v_uid AND id::text <> v_session;
+    END IF;
+END;
+$$;
+
 -- Daily sign reset: the first dispatcher online after US Eastern midnight resets
 -- every driver in the team to NO SIGN, exactly once per team per day.
 CREATE OR REPLACE FUNCTION public.run_daily_sign_reset()
@@ -841,6 +910,10 @@ REVOKE ALL ON FUNCTION public.set_staff_role(TEXT, TEXT) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.reset_staff_password(TEXT, TEXT) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.set_staff_active(TEXT, BOOLEAN) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.update_my_display_name(TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.update_my_username(TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.change_my_password(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.update_my_username(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.change_my_password(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.create_staff_account(TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_staff_role(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.reset_staff_password(TEXT, TEXT) TO authenticated;

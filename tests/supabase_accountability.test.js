@@ -688,4 +688,38 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     const again = (await mgrA.from('staff_profiles').select('shift_code').eq('id', kateId).single()).data;
     assert.equal(again.shift_code, null, 'reactivating does not put them back on a shift');
   });
+
+  test('30. Members change their own username; they sign in with the new one', async () => {
+    const leo = await mustSignIn(uname('leo'), pw);
+    let r = await leo.rpc('update_my_username', { p_username: 'a!' });
+    assert.match(r.error?.message || '', /3-32 characters/);
+    r = await leo.rpc('update_my_username', { p_username: uname('kate') });
+    assert.match(r.error?.message || '', /already taken/);
+    r = await leo.rpc('update_my_username', { p_username: `  ${uname('leon').toUpperCase()} ` });
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal(r.data, uname('leon'));
+    const { data: me } = await leo.from('staff_profiles').select('username').eq('id', (await leo.auth.getUser()).data.user.id).single();
+    assert.equal(me.username, uname('leon'));
+    assert.ok((await signIn(uname('leo'), pw)).error, 'the old username no longer signs in');
+    await mustSignIn(uname('leon'), pw);
+    const anon = await newClient().rpc('update_my_username', { p_username: 'nobody123' });
+    assert.ok(anon.error, 'signed-out callers are refused');
+  });
+
+  test('31. Members change their own password after confirming the current one', async () => {
+    const leon = await mustSignIn(uname('leon'), pw);
+    const other = await mustSignIn(uname('leon'), pw);
+    let r = await leon.rpc('change_my_password', { p_current_password: 'wrong-one', p_new_password: 'brand-new-1' });
+    assert.match(r.error?.message || '', /current password is not correct/);
+    r = await leon.rpc('change_my_password', { p_current_password: pw, p_new_password: '123' });
+    assert.match(r.error?.message || '', /at least 6 characters/);
+    r = await leon.rpc('change_my_password', { p_current_password: pw, p_new_password: 'brand-new-1' });
+    assert.equal(r.error, null, r.error?.message);
+    assert.ok((await signIn(uname('leon'), pw)).error, 'the old password stops working');
+    await mustSignIn(uname('leon'), 'brand-new-1');
+    const still = await leon.from('drivers').select('id').limit(1);
+    assert.equal(still.error, null, 'this device stays signed in');
+    const refreshed = await other.auth.refreshSession();
+    assert.ok(refreshed.error, 'the other device is signed out');
+  });
 });

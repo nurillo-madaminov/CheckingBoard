@@ -1,8 +1,8 @@
 <template>
-  <div class="cb-page cb-scroll attendance">
+  <!-- A section of the Team page -->
+  <div class="attendance">
     <div class="cb-page-head">
       <div class="title-block">
-        <h2 class="cb-title">Attendance</h2>
         <span class="cb-sub">Phone check-ins and check-outs · late = more than {{ lateAfter }} min after the shift starts</span>
       </div>
       <div class="cb-spacer"></div>
@@ -244,7 +244,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.attendance { user-select: text; }
+.attendance { user-select: text; display: flex; flex-direction: column; gap: 14px; }
 .title-block { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .stepper { display: flex; align-items: center; border: 1px solid var(--color-divider); background: var(--color-neutral-100); }
 .step { width: 34px; height: 34px; color: var(--color-text); }

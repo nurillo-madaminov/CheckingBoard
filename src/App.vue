@@ -26,10 +26,11 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <div v-else-if="isPhone" class="phone">
     <header class="phone-top">
       <span class="phone-mark">CB</span>
-      <div class="phone-title">
+      <!-- Your name opens Profile settings -->
+      <button :class="['phone-title', { 'is-on': phoneTab === 'profile' }]" title="Profile settings" aria-label="Profile settings" @click="phoneTab = 'profile'">
         <span class="phone-team cb-ellipsis">{{ currentTeam?.name || 'CheckingBoard' }}</span>
-        <span class="phone-user cb-ellipsis">{{ currentUser.displayName }} · {{ currentUser.role }}</span>
-      </div>
+        <span class="phone-user cb-ellipsis">{{ currentUser.displayName }} · {{ currentUser.role }} · Profile</span>
+      </button>
       <span :class="['live-dot', { 'is-live': isLive }]" :title="isLive ? 'Live' : 'Connecting…'"></span>
       <button class="phone-signout" title="Sign out" aria-label="Sign out" @click="handleLogout">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></svg>
@@ -38,7 +39,14 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
 
     <main class="phone-main">
       <div v-if="phoneTab === 'checkin'" class="cb-page cb-scroll"><CheckInView :refreshKey="attendanceVersion" /></div>
-      <div v-else-if="phoneTab === 'team'" class="cb-page cb-scroll"><TeamView /></div>
+      <div v-else-if="phoneTab === 'team' && !isManager" class="cb-page cb-scroll"><TeamView /></div>
+      <TeamManagementView
+        v-else-if="phoneTab === 'team' && isManager"
+        :refreshKey="attendanceVersion"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
+      />
+      <ProfileView v-else-if="phoneTab === 'profile'" @logout="handleLogout" />
       <div v-else-if="phoneTab === 'notifications'" class="cb-page cb-scroll">
         <NotificationsPanel
           asPage
@@ -58,12 +66,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       />
       <ActivityLogView v-else-if="phoneTab === 'logs' && isManager" :activeDrivers="drivers" :refreshKey="activityVersion" />
       <DailyStatisticsView v-else-if="phoneTab === 'stats' && isManager" :refreshKey="activityVersion" />
-      <AttendanceView
-        v-else-if="phoneTab === 'attendance' && isManager"
-        :refreshKey="attendanceVersion"
-        @saved="showToast($event)"
-        @error="showErrorToast($event.title, $event.message)"
-      />
     </main>
 
     <nav class="phone-tabs" aria-label="Sections">
@@ -99,7 +101,6 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       @update:collapsed="toggleSidebar"
       @navigate="navigateTo"
       @open-notifications="showNotifications = !showNotifications"
-      @open-staff="showStaffModal = true"
       @logout="handleLogout"
     />
 
@@ -166,9 +167,9 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         :refreshKey="activityVersion"
       />
 
-      <!-- 5. ATTENDANCE (manager): phone check-ins, late highlighted -->
-      <AttendanceView
-        v-else-if="activeView === 'attendance' && isManager"
+      <!-- 5. TEAM (manager): members and their accounts, attendance -->
+      <TeamManagementView
+        v-else-if="activeView === 'team' && isManager"
         :refreshKey="attendanceVersion"
         @saved="showToast($event)"
         @error="showErrorToast($event.title, $event.message)"
@@ -181,15 +182,10 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         :teamId="currentUser?.teamId || ''"
         @published="showToast({ title: 'Extension published', message: $event })"
       />
-    </main>
 
-    <!-- Team & staff -->
-    <StaffSwitchModal
-      v-if="showStaffModal"
-      @close="showStaffModal = false"
-      @user-changed="handleStaffUserChanged"
-      @logout="handleLogout"
-    />
+      <!-- 7. PROFILE SETTINGS (everyone): own name, username, password -->
+      <ProfileView v-else-if="activeView === 'profile'" @logout="handleLogout" />
+    </main>
 
     <!-- Add / edit company -->
     <AddCompanyModal
@@ -253,7 +249,6 @@ import CheckingBoardTable from './components/CheckingBoardTable.vue';
 import AddCompanyModal from './components/AddCompanyModal.vue';
 import AddDriverModal from './components/AddDriverModal.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import StaffSwitchModal from './components/StaffSwitchModal.vue';
 import ActivityLogView from './components/ActivityLogView.vue';
 import ShiftControlView from './components/ShiftControlView.vue';
 import DailyStatisticsView from './components/DailyStatisticsView.vue';
@@ -262,7 +257,8 @@ import NotificationsPanel from './components/NotificationsPanel.vue';
 import LoginView from './components/LoginView.vue';
 import CheckInView from './components/CheckInView.vue';
 import TeamView from './components/TeamView.vue';
-import AttendanceView from './components/AttendanceView.vue';
+import TeamManagementView from './components/TeamManagementView.vue';
+import ProfileView from './components/ProfileView.vue';
 import { syncPushSubscription, forgetThisDevice } from './services/pushService';
 
 import { BOTTOM_TABS, getStatusConfig, getStatusTab } from './config/statusConfig';
@@ -294,10 +290,9 @@ const drivers = ref([]);
 const activityVersion = ref(0); // bumped when new actions arrive so open log views reload
 const attendanceVersion = ref(0); // bumped when a check-in / check-out arrives live
 const activeTabId = ref('CHECKING_BOARD');
-const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'statistics' | 'attendance' | 'extensions'
+const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'statistics' | 'team' | 'extensions' | 'profile'
 const searchQuery = ref('');
 const selectedDriverId = ref('');
-const showStaffModal = ref(false);
 const isLive = ref(false);
 
 // Sidebar open / closed is a per-browser view preference
@@ -352,8 +347,7 @@ const ICONS = {
   team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />',
   shifts: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h5" /><path d="M17.5 17.5 16 16.3V14" /><circle cx="16" cy="16" r="6" />',
   logs: '<path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />',
-  stats: '<path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />',
-  attendance: '<rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /><path d="m9 16 2 2 4-4" />'
+  stats: '<path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />'
 };
 
 // Staff: check in, notifications, team. Managers: shifts, logs, statistics, attendance, notifications.
@@ -362,7 +356,7 @@ const phoneTabs = computed(() => (isManager.value
       { id: 'shifts', label: 'Shifts' },
       { id: 'logs', label: 'Logs' },
       { id: 'stats', label: 'Stats' },
-      { id: 'attendance', label: 'Attendance' },
+      { id: 'team', label: 'Team' },
       { id: 'notifications', label: 'Alerts' }
     ]
   : [
@@ -543,7 +537,6 @@ function leaveTeam() {
   showNotifications.value = false;
   confirmState.value = null;
   activeView.value = 'fleet';
-  showStaffModal.value = false;
 }
 
 // Whenever a (different) user signs in - restored session, sign in, or a new
@@ -600,15 +593,6 @@ onUnmounted(() => {
 // ---------------------------------------------------------------------------
 // Session events
 // ---------------------------------------------------------------------------
-function handleStaffUserChanged(updatedUser) {
-  if (updatedUser) {
-    showToast({
-      title: 'Team Updated',
-      message: `Signed in as ${updatedUser.displayName} (${updatedUser.role})`
-    });
-  }
-}
-
 async function handleLogout() {
   // Stop sending this person's alerts to this device (while still signed in)
   await forgetThisDevice();
@@ -668,7 +652,7 @@ async function runConfirm() {
 
 // Board shortcuts pause while any dialog is open
 const anyDialogOpen = computed(() =>
-  showStaffModal.value || showCompanyModal.value || showDriverModal.value || !!confirmState.value
+  showCompanyModal.value || showDriverModal.value || !!confirmState.value
 );
 
 // Tab order is a personal view preference of this browser (not fleet data)
@@ -1100,7 +1084,11 @@ function handleResetData() {
   width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center;
   background: var(--color-accent); font-family: var(--font-heading); font-weight: 600; font-size: 13px;
 }
-.phone-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.phone-title {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; text-align: left;
+  border: 0; padding: 4px 6px; margin: -4px 0 -4px -6px; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.phone-title:active, .phone-title.is-on { background: var(--color-accent-800); }
 .phone-team { font-family: var(--font-heading); font-weight: 600; font-size: 17px; }
 .phone-user { font-size: 12px; color: var(--color-accent-300); text-transform: capitalize; }
 .live-dot { width: 7px; height: 7px; flex-shrink: 0; background: var(--color-neutral-600); }

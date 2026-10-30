@@ -46,7 +46,7 @@ A. CONFIGURATION (ONCE, ON THE HOSTING PLATFORM):
 B. HOW A TEAM WORKS:
 1. A manager opens the app and clicks "Create a Team" (team name, their name,
    username, password). They become that team's manager and are signed in.
-2. The manager opens Team & Staff Management and creates logins (username +
+2. The manager opens Team (sidebar) -> Members and creates logins (username +
    password) for each staff member, then gives them those credentials.
 3. Staff sign in with that username and password. Everyone in the team sees and
    edits the same fleet; every action is recorded in the same database.
@@ -153,7 +153,7 @@ The dynamic table consists of 5 fixed-width columns with zero jitter:
    - Removed forced CSS uppercase transformation in Add Company and Add Driver modals.
    - Preserves exact typed letter casing (lower, upper, mixed case).
 5. Modal Dismissal (Esc & Click Outside):
-   - All modals (Add Company, Add Driver, Status Config, Team & Staff) close
+   - All modals (Add Company, Add Driver, Status Config) close
      when pressing the Esc key and when clicking anywhere outside the modal dialog card.
 6. Removed Excel Import / Export:
    - Removed "Export Excel" and "Import" buttons and logic as requested to streamline
@@ -396,9 +396,26 @@ C. "CREATE A TEAM" (CREATOR BECOMES MANAGER): rpc register_team
 - Inputs: Team name, Manager full name, Username, Password (min. 6 characters).
 - Creates the team, the login and a manager profile, then signs the creator in.
 
-D. TEAM & STAFF MANAGEMENT MODAL (`StaffSwitchModal.vue`, top bar user pill):
-- Everyone: team roster, update own display name (rpc update_my_display_name;
-  past activity snapshots keep the old name), Log Out.
+D. PROFILE SETTINGS & TEAM PAGE (replace the old Team & staff modal):
+- PROFILE SETTINGS (ProfileView.vue, everyone): opened from your name at the
+  bottom of the sidebar, or by tapping your name in the phone's top bar. No
+  profile picture. Sections:
+  * Name: display name (rpc update_my_display_name; past snapshots keep the old name).
+  * Username: also the sign-in name (rpc update_my_username: 3-32 letters, numbers,
+    dot, dash, underscore; unique; updates staff_profiles and the Auth login email
+    <username>@checkingboard.internal). You stay signed in; sign in with the new
+    username next time (also in the Leader ELD extension).
+  * Password: current password + new password twice (rpc change_my_password: checks
+    the current password, at least 6 characters). This device stays signed in, the
+    person's other devices are signed out.
+  * Phone alerts toggle for this device, and "Sign out of this device".
+- TEAM PAGE (TeamManagementView.vue, managers; sidebar "Team", phone tab "Team"),
+  two tabs (the last one opened is remembered in the browser):
+  * Members (TeamMembers.vue): the roster with role, state and shift, and the
+    account actions below. Your own row says to use Profile settings.
+  * Attendance (AttendanceView.vue, see 16E D): month summary, every check-in,
+    "Late after" rule and the reminders switch.
+  Staff on phones keep their own "Team" tab (their shift-mates and managers).
 - Managers only (each is a database function that checks the caller is an active
   manager of the same team):
   * "Create Staff Account" (rpc create_staff_account): name, username, initial
@@ -409,7 +426,7 @@ D. TEAM & STAFF MANAGEMENT MODAL (`StaffSwitchModal.vue`, top bar user pill):
     access; history is kept. Deactivating also takes the person off their shift and
     removes their phones from push alerts (reactivating does not put them back on a
     shift). Managers cannot change their own role or status.
-- Deactivated members are listed ONLY here (marked "Deactivated"). Everywhere else
+- Deactivated members are listed ONLY in Team -> Members (marked "Deactivated"). Everywhere else
   (shift cards and pickers, Logs staff filter, Statistics per-staff table,
   Attendance person filter and month summary, notification recipients, on-duty list,
   Team page) shows active members only. Their past records stay: log rows and
@@ -510,7 +527,7 @@ square hairline-bordered objects. The only warm color is the signal
 
 - Shell: dark steel sidebar (SideNav.vue) with Board / Logs (+ Shifts / Statistics
   for managers), the shift on duty with time left and its staff's action counts,
-  Tashkent and Eastern clocks, live indicator, and your name (opens Team & staff)
+  Tashkent and Eastern clocks, live indicator, and your name (opens Profile settings)
   with sign-out. The old top bar (StatsBar), Excel bottom bar (BottomTabs) and the
   status color editor (StatusConfigModal) were removed.
 - Board (CheckingBoardTable.vue): title + search ("/" focuses it), Reset to Ready,
@@ -731,7 +748,7 @@ A. WHAT STAFF GET:
 - Needs phone alerts turned on on that phone (Notifications page) like any push.
 - Goes to active members with a shift (managers too, if they are on a shift).
 
-B. MANAGER SWITCH: "Check-in / out reminders" on the Attendance page (PC and phone),
+B. MANAGER SWITCH: "Check-in / out reminders" on Team -> Attendance (PC and phone),
    on by default, for the whole team (rpc set_shift_reminders, managers only). The
    switch is hidden until the database script has been re-run.
 
@@ -769,6 +786,13 @@ F. TESTS: 28 (reminder switch: managers only), 29 (deactivation clears the shift
 --------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+OCTOBER 2026 - PROFILE SETTINGS & TEAM PAGE (re-run supabase_schema.sql):
+- The Team & staff modal is gone. Everyone gets Profile settings (name, username,
+  password, phone alerts, sign out); managers get a Team page that combines the
+  staff roster and account actions (Members) with Attendance (section 15 D).
+- New rpc update_my_username and change_my_password.
+- Tests 30-31.
+
 OCTOBER 2026 - NO SURPRISE SIGN-OUTS:
 - Sign out now ends the session on this device only (it used to sign the person
   out on every device, so their phone or other browser dropped to the login later).
@@ -777,7 +801,7 @@ OCTOBER 2026 - NO SURPRISE SIGN-OUTS:
 
 OCTOBER 2026 - SHIFT REMINDERS & DEACTIVATED STAFF (re-run supabase_schema.sql):
 - Phone reminders 2 minutes before each shift starts (check in) and ends (check
-  out); managers turn them on / off on the Attendance page (section 16F). Needs the
+  out); managers turn them on / off on Team -> Attendance (section 16F). Needs the
   shift-reminders Edge Function and a one-time setup_shift_reminders call.
 - Deactivated staff appear only in Team & staff; deactivation also takes them off
   their shift and removes their phones from alerts (section 15 D).
