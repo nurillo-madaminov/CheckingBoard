@@ -260,7 +260,8 @@ const dutyStaff = computed(() => {
 /* Nav: the same left padding open and closed puts each icon on the rail's center line */
 .nav-item { padding-left: 13px; position: relative; }
 /* The hidden labels still take room, so without this the icon is squeezed to nothing when closed */
-.nav-item > svg, .side.is-collapsed .nav-item { width: 44px; }
+.nav-item > svg { flex-shrink: 0; }
+.side.is-collapsed .nav-item { width: 44px; }
 .side.is-collapsed .live { padding-left: 27px; }
 
 /* Me: the sign-out button slides above the avatar when closed */
