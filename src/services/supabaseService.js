@@ -169,6 +169,7 @@ export async function runDailySignReset() {
 // ---------- realtime ----------
 let activeChannel = null;
 let attendanceChannel = null;
+let presenceChannel = null;
 
 export function broadcastFleetReset() {
   if (!activeChannel) return;
@@ -183,7 +184,7 @@ export function broadcastFleetReset() {
  * Live sync between dispatchers of the same team. postgres_changes events are
  * already limited by RLS; the team check below is an extra guard.
  */
-export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChange, onFleetReset, onStatus, onActivityInsert, onAttendanceChange }) {
+export function subscribeToFleetChanges({ teamId, userId, onCompanyChange, onDriverChange, onFleetReset, onStatus, onActivityInsert, onAttendanceChange, onPresence }) {
   if (!supabase || !teamId) return null;
   unsubscribeFromRealtime();
 
@@ -222,11 +223,25 @@ export function subscribeToFleetChanges({ teamId, onCompanyChange, onDriverChang
       .subscribe();
   }
 
+  // Who has CheckingBoard open right now, on any device (Realtime Presence keyed by
+  // staff id). Its own channel too, so a presence problem never stops the board's sync.
+  // An app that closes, signs out or loses its connection drops off by itself.
+  if (onPresence && userId) {
+    const channel = supabase.channel(`checkingboard-presence-${teamId}`, { config: { presence: { key: userId } } });
+    channel
+      .on('presence', { event: 'sync' }, () => onPresence(Object.keys(channel.presenceState())))
+      .subscribe(status => {
+        // Also after a reconnect: announce this device again
+        if (status === 'SUBSCRIBED') channel.track({ online_at: new Date().toISOString() });
+      });
+    presenceChannel = channel;
+  }
+
   return activeChannel;
 }
 
 export function unsubscribeFromRealtime() {
-  for (const channel of [activeChannel, attendanceChannel]) {
+  for (const channel of [activeChannel, attendanceChannel, presenceChannel]) {
     if (!channel) continue;
     try {
       supabase.removeChannel(channel);
@@ -236,4 +251,5 @@ export function unsubscribeFromRealtime() {
   }
   activeChannel = null;
   attendanceChannel = null;
+  presenceChannel = null;
 }
