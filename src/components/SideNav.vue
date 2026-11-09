@@ -63,17 +63,20 @@
         </div>
         <span class="duty-bar"><span :style="{ width: `${duty.pct}%` }"></span></span>
       </div>
+      <!-- Everyone online now: the shift on duty first, then the rest -->
       <div class="tall-only duty-staff">
-        <div v-for="p in dutyStaff" :key="p.id" class="duty-person">
-          <span class="cb-avatar duty-avatar">{{ p.initials }}</span>
+        <div class="row-between">
+          <span class="kicker">Online now</span>
+          <span class="dim">{{ onlineStaff.length }}</span>
+        </div>
+        <div v-for="p in onlineStaff" :key="p.id" class="duty-person">
+          <span :class="['cb-avatar', 'duty-avatar', { 'is-off-duty': !p.onDuty }]">{{ p.initials }}</span>
           <div class="duty-person-text">
             <span class="cb-ellipsis duty-name">{{ p.name }}</span>
-            <span class="dim small">{{ p.count }} {{ p.count === 1 ? 'action' : 'actions' }} this shift</span>
+            <span class="dim small cb-ellipsis">{{ p.detail }}</span>
           </div>
         </div>
-        <span v-if="!dutyScheduled" class="dim small">Nobody scheduled</span>
-        <span v-else-if="!dutyStaff.length" class="dim small">Nobody from this shift is online</span>
-        <span v-else-if="dutyStaff.length < dutyScheduled" class="dim small">{{ dutyStaff.length }} of {{ dutyScheduled }} on this shift online</span>
+        <span v-if="!onlineStaff.length" class="dim small">Nobody online</span>
       </div>
     </div>
 
@@ -142,23 +145,28 @@ const dutyHours = computed(() => shiftHours(duty.value.code, duty.value.day).tas
 const clocks = computed(() => ({ tas: clockTashkent(now.value), et: clockEastern(now.value) }));
 const logsToday = computed(() => props.todayActivities.length);
 
-// Everyone scheduled on the shift on duty
-const dutyRoster = computed(() => props.roster.filter(p => p.isActive && p.shiftCode === duty.value.code));
-const dutyScheduled = computed(() => dutyRoster.value.length);
-
-// Of them, only those with the app open right now (not everyone scheduled)
-const dutyStaff = computed(() => {
+// Everyone with the app open right now (not everyone scheduled), whatever their shift:
+// the shift on duty first with its action counts, then the rest by name with their shift or role
+const onlineStaff = computed(() => {
   const day = duty.value.day;
-  return dutyRoster.value
-    .filter(p => props.onlineIds.has(p.id))
-    .map(p => ({
-      id: p.id,
-      name: p.displayName,
-      initials: initials(p.displayName),
-      count: props.todayActivities.filter(a =>
+  return props.roster
+    .filter(p => p.isActive && props.onlineIds.has(p.id))
+    .map(p => {
+      const onDuty = p.shiftCode === duty.value.code;
+      const count = props.todayActivities.filter(a =>
         a.staff_user_id === p.id && a.shift_code === duty.value.code && a.shift_date === day
-      ).length
-    }));
+      ).length;
+      return {
+        id: p.id,
+        name: p.displayName,
+        initials: initials(p.displayName),
+        onDuty,
+        detail: onDuty
+          ? `${count} ${count === 1 ? 'action' : 'actions'} this shift`
+          : (p.shiftCode ? `${getShiftConfig(p.shiftCode).label} shift` : roleLabel(p.role))
+      };
+    })
+    .sort((a, b) => (b.onDuty - a.onDuty) || a.name.localeCompare(b.name));
 });
 </script>
 
@@ -205,6 +213,7 @@ const dutyStaff = computed(() => {
 .duty-staff { display: flex; flex-direction: column; gap: 12px; }
 .duty-person { display: flex; align-items: center; gap: 10px; }
 .duty-avatar { width: 28px; height: 28px; font-size: 12px; background: var(--color-accent-700); color: var(--color-bg); }
+.duty-avatar.is-off-duty { background: var(--color-accent-800); color: var(--color-accent-200); }
 .duty-person-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
 .duty-name { font-size: 13px; font-weight: 500; }
 
