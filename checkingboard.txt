@@ -526,7 +526,7 @@ square hairline-bordered objects. The only warm color is the signal
 (--color-signal, #a3412f): overdue checks, NO SIGN, destructive actions.
 
 - Shell: dark steel sidebar (SideNav.vue) with Board / Logs (+ Shifts / Statistics
-  for managers), the shift on duty with time left and its staff who are online now with their action counts,
+  for managers), the shift on duty with time left, and everyone online now (that shift first, with action counts),
   Tashkent and Eastern clocks, live indicator, and your name (opens Profile settings)
   with sign-out. The old top bar (StatsBar), Excel bottom bar (BottomTabs) and the
   status color editor (StatusConfigModal) were removed.
@@ -835,12 +835,14 @@ E. SMALL SCREENS (checked at 320, 360, 375, 390 and 430 px wide and in landscape
 F. TESTS: 32 (supervisor role: manager rights, set and created by managers).
 
 --------------------------------------------------------------------------------
-16H. WHO IS ONLINE (sidebar "On duty")
+16H. WHO IS ONLINE (sidebar "Online now")
 --------------------------------------------------------------------------------
-- The On duty block lists only the people on the shift on duty who have
-  CheckingBoard open right now (PC or phone), not everyone scheduled. Under the
-  list: "X of Y on this shift online" when some are not, "Nobody from this shift
-  is online", or "Nobody scheduled".
+- Under the shift on duty, "Online now · N" lists everyone in the team who has
+  CheckingBoard open right now (PC or phone), whatever their shift, and never
+  people who are only scheduled. People on the shift on duty come first with
+  their action counts this shift (brighter avatar); the rest follow by name with
+  their shift ("Night shift") or, without a shift, their role ("Manager").
+  "Nobody online" when the list is empty.
 - How: Supabase Realtime Presence on the channel checkingboard-presence-<team_id>
   (services/supabaseService.js), keyed by the staff id. Each signed-in app joins it
   and announces itself (again after a reconnect); App.vue keeps the set of online
@@ -855,8 +857,9 @@ F. TESTS: 32 (supervisor role: manager rights, set and created by managers).
 17. CHANGE LOG
 --------------------------------------------------------------------------------
 NOVEMBER 2026 - ONLINE STAFF IN THE SIDEBAR:
-- On duty shows only the people of the shift on duty who are online right now
-  (Realtime Presence), not everyone scheduled (section 16H).
+- The sidebar shows who is online right now (Realtime Presence), not everyone
+  scheduled: "Online now" lists everyone online, the shift on duty first
+  (section 16H).
 
 OCTOBER 2026 - ROLES, PHONE APP TABS, NO NOTIFICATIONS (re-run supabase_schema.sql):
 - New supervisor role (manager powers + check-in); managers no longer check in or
