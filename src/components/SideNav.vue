@@ -71,7 +71,9 @@
             <span class="dim small">{{ p.count }} {{ p.count === 1 ? 'action' : 'actions' }} this shift</span>
           </div>
         </div>
-        <span v-if="!dutyStaff.length" class="dim small">Nobody scheduled</span>
+        <span v-if="!dutyScheduled" class="dim small">Nobody scheduled</span>
+        <span v-else-if="!dutyStaff.length" class="dim small">Nobody from this shift is online</span>
+        <span v-else-if="dutyStaff.length < dutyScheduled" class="dim small">{{ dutyStaff.length }} of {{ dutyScheduled }} on this shift online</span>
       </div>
     </div>
 
@@ -119,6 +121,8 @@ const props = defineProps({
   // Today's action records (staff: their own and their shift-mates', manager: the team)
   todayActivities: { type: Array, default: () => [] },
   roster: { type: Array, default: () => [] },
+  // Staff ids with the app open right now
+  onlineIds: { type: Set, default: () => new Set() },
   // Closed = a slim icon rail
   collapsed: { type: Boolean, default: false }
 });
@@ -138,10 +142,15 @@ const dutyHours = computed(() => shiftHours(duty.value.code, duty.value.day).tas
 const clocks = computed(() => ({ tas: clockTashkent(now.value), et: clockEastern(now.value) }));
 const logsToday = computed(() => props.todayActivities.length);
 
+// Everyone scheduled on the shift on duty
+const dutyRoster = computed(() => props.roster.filter(p => p.isActive && p.shiftCode === duty.value.code));
+const dutyScheduled = computed(() => dutyRoster.value.length);
+
+// Of them, only those with the app open right now (not everyone scheduled)
 const dutyStaff = computed(() => {
   const day = duty.value.day;
-  return props.roster
-    .filter(p => p.isActive && p.shiftCode === duty.value.code)
+  return dutyRoster.value
+    .filter(p => props.onlineIds.has(p.id))
     .map(p => ({
       id: p.id,
       name: p.displayName,

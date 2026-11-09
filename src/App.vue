@@ -83,6 +83,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :boardCount="tabCounts.CHECKING_BOARD"
       :todayActivities="todayActivities"
       :roster="activeStaffProfiles"
+      :onlineIds="onlineIds"
       @update:collapsed="toggleSidebar"
       @navigate="navigateTo"
       @logout="handleLogout"
@@ -266,6 +267,8 @@ const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'stati
 const searchQuery = ref('');
 const selectedDriverId = ref('');
 const isLive = ref(false);
+// Staff ids of everyone in the team with the app open right now (Realtime Presence)
+const onlineIds = ref(new Set());
 
 // Sidebar open / closed is a per-browser view preference
 const SIDEBAR_KEY = 'checkingboard_sidebar_collapsed';
@@ -425,6 +428,8 @@ function setupRealtime() {
   isLive.value = false;
   db.subscribeToFleetChanges({
     teamId,
+    userId: currentUser.value.id,
+    onPresence: (ids) => { onlineIds.value = new Set(ids); },
     onStatus: (status) => {
       isLive.value = status === 'SUBSCRIBED';
     },
@@ -498,6 +503,7 @@ function leaveTeam() {
   todayTimer = null;
   db.unsubscribeFromRealtime();
   isLive.value = false;
+  onlineIds.value = new Set();
   companies.value = [];
   drivers.value = [];
   todayActivities.value = [];

@@ -526,7 +526,7 @@ square hairline-bordered objects. The only warm color is the signal
 (--color-signal, #a3412f): overdue checks, NO SIGN, destructive actions.
 
 - Shell: dark steel sidebar (SideNav.vue) with Board / Logs (+ Shifts / Statistics
-  for managers), the shift on duty with time left and its staff's action counts,
+  for managers), the shift on duty with time left and its staff who are online now with their action counts,
   Tashkent and Eastern clocks, live indicator, and your name (opens Profile settings)
   with sign-out. The old top bar (StatsBar), Excel bottom bar (BottomTabs) and the
   status color editor (StatusConfigModal) were removed.
@@ -835,8 +835,29 @@ E. SMALL SCREENS (checked at 320, 360, 375, 390 and 430 px wide and in landscape
 F. TESTS: 32 (supervisor role: manager rights, set and created by managers).
 
 --------------------------------------------------------------------------------
+16H. WHO IS ONLINE (sidebar "On duty")
+--------------------------------------------------------------------------------
+- The On duty block lists only the people on the shift on duty who have
+  CheckingBoard open right now (PC or phone), not everyone scheduled. Under the
+  list: "X of Y on this shift online" when some are not, "Nobody from this shift
+  is online", or "Nobody scheduled".
+- How: Supabase Realtime Presence on the channel checkingboard-presence-<team_id>
+  (services/supabaseService.js), keyed by the staff id. Each signed-in app joins it
+  and announces itself (again after a reconnect); App.vue keeps the set of online
+  ids and passes it to SideNav. Signing out or closing the app removes the person
+  at once; a lost connection (or a phone app suspended in the background) removes
+  them once Realtime notices the connection is gone.
+  It is its own channel, so a presence problem never stops the board's live sync.
+- Presence is a live display only: nothing is stored, and check-in / attendance
+  are unchanged.
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+NOVEMBER 2026 - ONLINE STAFF IN THE SIDEBAR:
+- On duty shows only the people of the shift on duty who are online right now
+  (Realtime Presence), not everyone scheduled (section 16H).
+
 OCTOBER 2026 - ROLES, PHONE APP TABS, NO NOTIFICATIONS (re-run supabase_schema.sql):
 - New supervisor role (manager powers + check-in); managers no longer check in or
   get reminders (section 16G).
