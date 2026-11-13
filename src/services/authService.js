@@ -38,6 +38,8 @@ function mapProfile(row) {
     displayName: row.display_name,
     role: row.role,
     isActive: row.is_active,
+    // Position on the Shifts page (null until a manager has ordered the list)
+    scheduleOrder: row.schedule_order ?? null,
     createdAt: row.created_at
   };
 }
@@ -290,6 +292,20 @@ export async function saveShiftSchedule(rows) {
       throw new Error('The day-by-day schedule needs the updated database script. Run supabase_schema.sql in the Supabase SQL Editor, then try again.');
     }
     throw friendlyError(error, 'Failed to save the shift schedule');
+  }
+  await loadTeamRoster();
+}
+
+/**
+ * Manager sets the order of people on the Shifts page: [staff ids], top to bottom
+ */
+export async function saveScheduleOrder(ids) {
+  const { error } = await supabase.rpc('save_schedule_order', { p_ids: ids });
+  if (error) {
+    if (/save_schedule_order|schema cache/i.test(error.message || '')) {
+      throw new Error('Reordering people needs the updated database script. Run supabase_schema.sql in the Supabase SQL Editor, then try again.');
+    }
+    throw friendlyError(error, 'Failed to save the order');
   }
   await loadTeamRoster();
 }
