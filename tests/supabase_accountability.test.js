@@ -316,6 +316,21 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal((await scheduleOf(mgrA, staffA1Id)).length, 0);
   });
 
+  test('16a. Shifts page order: managers set it for their own team only', async () => {
+    const john = await mustSignIn(uname('john'), pw);
+    const denied = await john.rpc('save_schedule_order', { p_ids: [staffA1Id] });
+    assert.ok(denied.error, 'staff cannot reorder');
+    const r = await mgrA.rpc('save_schedule_order', { p_ids: [staffA2Id, staffA1Id] });
+    assert.equal(r.error, null, r.error?.message);
+    const { data } = await john.from('staff_profiles').select('id, schedule_order').in('id', [staffA1Id, staffA2Id]);
+    assert.equal(data.find(p => p.id === staffA2Id).schedule_order, 1);
+    assert.equal(data.find(p => p.id === staffA1Id).schedule_order, 2);
+    // Another team's manager cannot move them
+    await mgrB.rpc('save_schedule_order', { p_ids: [staffA1Id, staffA2Id] });
+    const after = await mgrA.from('staff_profiles').select('schedule_order').eq('id', staffA1Id).single();
+    assert.equal(after.data.schedule_order, 2);
+  });
+
   test('16b. Shift hours: manager sets them per weekday; staff read them; other teams see nothing', async () => {
     const john = await mustSignIn(uname('john'), pw);
     const hours = [

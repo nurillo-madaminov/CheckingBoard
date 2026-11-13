@@ -84,6 +84,8 @@ BEGIN
         ALTER TABLE public.staff_profiles DROP COLUMN shift_code;
     END IF;
 END $$;
+-- Where this person stands in the Shifts page's week overview (see save_schedule_order)
+ALTER TABLE public.staff_profiles ADD COLUMN IF NOT EXISTS schedule_order INTEGER;
 -- Old scripts stored plain-text demo passwords here; passwords now live (hashed) in Supabase Auth.
 ALTER TABLE public.staff_profiles DROP COLUMN IF EXISTS password_hash;
 
@@ -931,6 +933,36 @@ BEGIN
 END;
 $$;
 
+-- Manager sets the order of people on the Shifts page: ["staff id", "staff id", ...]
+-- (top to bottom). Anyone left out goes after them, by name.
+CREATE OR REPLACE FUNCTION public.save_schedule_order(p_ids JSONB)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_team TEXT := public.current_team_id();
+BEGIN
+    IF NOT public.is_team_manager() THEN
+        RAISE EXCEPTION 'Only managers can change the shift schedule' USING ERRCODE = '42501';
+    END IF;
+    IF jsonb_typeof(coalesce(p_ids, '[]'::jsonb)) <> 'array' THEN
+        RAISE EXCEPTION 'The order must be a list';
+    END IF;
+
+    UPDATE public.staff_profiles p
+    SET schedule_order = o.position
+    FROM (
+        SELECT p2.id, min(i.ord)::int AS position
+        FROM public.staff_profiles p2
+        LEFT JOIN jsonb_array_elements_text(coalesce(p_ids, '[]'::jsonb)) WITH ORDINALITY AS i(id, ord) ON i.id = p2.id
+        WHERE p2.team_id = v_team
+        GROUP BY p2.id
+    ) o
+    WHERE p.id = o.id AND p.schedule_order IS DISTINCT FROM o.position;
+END;
+$$;
+
 -- Manager replaces the team's shift hours:
 --   [{"shift_code": "MORNING", "weekday": 1, "start_min": 420, "end_min": 900, "is_off": false}, ...]
 -- Days left out use the default hours. is_off turns the shift off on that day
@@ -1011,6 +1043,8 @@ REVOKE ALL ON FUNCTION public.run_daily_sign_reset() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.run_daily_sign_reset() TO authenticated;
 REVOKE ALL ON FUNCTION public.save_week_schedule(JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_week_schedule(JSONB) TO authenticated;
+REVOKE ALL ON FUNCTION public.save_schedule_order(JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_schedule_order(JSONB) TO authenticated;
 REVOKE ALL ON FUNCTION public.save_shift_hours(JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_shift_hours(JSONB) TO authenticated;
 -- Internal: only the activity trigger places actions in shifts

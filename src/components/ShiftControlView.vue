@@ -144,7 +144,7 @@
     <div class="cb-panel week">
       <div class="week-head">
         <span class="cb-label">Week overview</span>
-        <span class="cb-sub small">One shift per person per day. "Off" is a day off. A shift turned off on a day can't be picked for it.</span>
+        <span class="cb-sub small">One shift per person per day. "Off" is a day off. A shift turned off on a day can't be picked for it. Drag a row by its handle to reorder people.</span>
       </div>
       <div class="week-scroll cb-scroll">
         <table class="week-table">
@@ -158,9 +158,37 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="member in activeMembers" :key="member.id">
+            <tr
+              v-for="(member, index) in activeMembers"
+              :key="member.id"
+              :class="{ 'is-dragging': draggedId === member.id, 'drop-before': dropAt?.id === member.id && dropAt.position === 'before', 'drop-after': dropAt?.id === member.id && dropAt.position === 'after' }"
+              @dragover="onRowDragOver(member.id, $event)"
+              @drop.prevent="onRowDrop"
+            >
               <td class="col-name">
                 <span class="week-person">
+                  <!-- Drag to reorder; Alt + arrow keys move the row too -->
+                  <button
+                    type="button"
+                    class="grip"
+                    draggable="true"
+                    :title="`Drag to move ${member.displayName} (or Alt + ↑ / ↓)`"
+                    :aria-label="`Move ${member.displayName}. Position ${index + 1} of ${activeMembers.length}. Use Alt + arrow up or down.`"
+                    @dragstart="onRowDragStart(member.id, $event)"
+                    @dragend="onRowDragEnd"
+                    @keydown.alt.up.prevent="moveMember(member.id, -1, $event)"
+                    @keydown.alt.down.prevent="moveMember(member.id, 1, $event)"
+                  >
+                    <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.4" /><circle cx="9" cy="3" r="1.4" /><circle cx="3" cy="8" r="1.4" /><circle cx="9" cy="8" r="1.4" /><circle cx="3" cy="13" r="1.4" /><circle cx="9" cy="13" r="1.4" /></svg>
+                  </button>
+                  <span class="touch-move">
+                    <button type="button" class="btn btn-ghost btn-icon" :disabled="index === 0" :aria-label="`Move ${member.displayName} up`" @click="moveMember(member.id, -1)">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" /></svg>
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-icon" :disabled="index === activeMembers.length - 1" :aria-label="`Move ${member.displayName} down`" @click="moveMember(member.id, 1)">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    </button>
+                  </span>
                   <span class="cb-avatar person-avatar">{{ initials(member.displayName) }}</span>
                   <span class="cb-ellipsis">{{ member.displayName }}</span>
                 </span>
@@ -196,13 +224,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
 import {
   SHIFTS, WEEKDAYS, getShiftConfig, shiftHours, placeShift, currentWorkDay, addDays,
   isoWeekday, customShiftHours, shiftSchedule, formatMinutes, parseMinutes, formatWorkDayShort
 } from '../config/shifts';
 import {
-  staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours, isCurrentUserManager
+  staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours, saveScheduleOrder,
+  isCurrentUserManager
 } from '../services/authService';
 import { formatMinutesSpan } from '../services/attendanceService';
 import { initials } from '../utils/format';
@@ -217,9 +246,17 @@ defineProps({
 const emit = defineEmits(['saved', 'office-saved', 'office-error']);
 
 const isManager = computed(() => isCurrentUserManager());
-const activeMembers = computed(() => staffProfiles.value
+// Active people in the saved order: the manager's own order first, then anyone new by name
+const savedMembers = computed(() => staffProfiles.value
   .filter(p => p.isActive)
-  .sort((a, b) => a.displayName.localeCompare(b.displayName)));
+  .sort((a, b) => ((a.scheduleOrder ?? Infinity) - (b.scheduleOrder ?? Infinity)) || a.displayName.localeCompare(b.displayName)));
+// The order being edited: staff ids, top to bottom (used for every list on this page)
+const orderDraft = ref([]);
+const activeMembers = computed(() => {
+  const position = new Map(orderDraft.value.map((id, i) => [id, i]));
+  // sort is stable, so people missing from the draft keep their saved place at the end
+  return [...savedMembers.value].sort((a, b) => (position.get(a.id) ?? Infinity) - (position.get(b.id) ?? Infinity));
+});
 // People: { staffId: { 1: 'MORNING', 2: '', ... 7 } } ('' = day off)
 const draft = reactive({});
 // Hours: { MORNING: { 1: { start, end, off }, ... 7 }, ... } as 'HH:MM'; off = no such shift that day
@@ -260,6 +297,7 @@ function savedRange(code, iso) {
 const sameRange = (a, b) => a.start === b.start && a.end === b.end && !!a.off === !!b.off;
 
 function resetDraft() {
+  orderDraft.value = savedMembers.value.map(m => m.id);
   Object.keys(draft).forEach(id => { delete draft[id]; });
   activeMembers.value.forEach(m => {
     draft[m.id] = Object.fromEntries(WEEKDAYS.map(d => [d.iso, savedShift(m.id, d.iso)]));
@@ -386,7 +424,66 @@ const peopleDirty = computed(() => activeMembers.value.some(m => WEEKDAYS.some(d
   (draft[m.id]?.[d.iso] || '') !== savedShift(m.id, d.iso)
 )));
 
-const isDirty = computed(() => peopleDirty.value || hoursDirty.value);
+// ---------------- order of people ----------------
+const orderDirty = computed(() => activeMembers.value.some((m, i) => m.id !== savedMembers.value[i]?.id));
+const draggedId = ref(null);
+const dropAt = ref(null); // { id, position: 'before' | 'after' }
+
+// Put a person just before / after another one
+function placeMember(id, targetId, position) {
+  if (id === targetId) return;
+  const ids = activeMembers.value.map(m => m.id).filter(x => x !== id);
+  const at = ids.indexOf(targetId);
+  if (at < 0) return;
+  ids.splice(position === 'after' ? at + 1 : at, 0, id);
+  orderDraft.value = ids;
+}
+
+// One step up (-1) or down (1); keeps the keyboard on the same handle
+function moveMember(id, step, event) {
+  const ids = activeMembers.value.map(m => m.id);
+  const from = ids.indexOf(id);
+  const to = from + step;
+  if (from < 0 || to < 0 || to >= ids.length) return;
+  ids.splice(to, 0, ...ids.splice(from, 1));
+  orderDraft.value = ids;
+  const handle = event?.currentTarget;
+  if (handle) nextTick(() => handle.focus());
+}
+
+function onRowDragStart(id, event) {
+  draggedId.value = id;
+  dropAt.value = null;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', id);
+  // Show the whole row under the pointer, not just the handle
+  const row = event.currentTarget.closest('tr');
+  if (row) event.dataTransfer.setDragImage(row, 16, row.offsetHeight / 2);
+}
+
+function onRowDragOver(id, event) {
+  if (!draggedId.value) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  if (id === draggedId.value) {
+    dropAt.value = null;
+    return;
+  }
+  const box = event.currentTarget.getBoundingClientRect();
+  dropAt.value = { id, position: event.clientY < box.top + box.height / 2 ? 'before' : 'after' };
+}
+
+function onRowDrop() {
+  if (draggedId.value && dropAt.value) placeMember(draggedId.value, dropAt.value.id, dropAt.value.position);
+  onRowDragEnd();
+}
+
+function onRowDragEnd() {
+  draggedId.value = null;
+  dropAt.value = null;
+}
+
+const isDirty = computed(() => peopleDirty.value || hoursDirty.value || orderDirty.value);
 
 // One shift per person per day: choosing another shift moves them, '' is a day off
 function setShift(memberId, iso, code) {
@@ -462,6 +559,7 @@ async function save() {
   errorMessage.value = '';
   try {
     const hours = hoursDirty.value ? hoursRows() : null;
+    if (orderDirty.value) await saveScheduleOrder(activeMembers.value.map(m => m.id));
     if (hours) await saveShiftHours(hours);
     if (peopleDirty.value) await saveShiftSchedule(scheduleRows());
     // Turning a shift off also takes its people off that day in the database
@@ -576,10 +674,25 @@ onUnmounted(() => clearInterval(clockTimer));
 .week-table .is-selected { background: var(--color-accent-100); }
 .th-btn { border: 0; background: transparent; padding: 4px 6px; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
 .th-btn:hover { color: var(--color-accent-700); }
-.col-name { width: 200px; max-width: 200px; position: sticky; left: 0; z-index: 1; background: var(--color-neutral-100); }
+.col-name { width: 230px; max-width: 230px; position: sticky; left: 0; z-index: 1; background: var(--color-neutral-100); }
 .week-person { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
 .col-days { width: 48px; text-align: right !important; font-family: var(--font-heading); font-size: 16px; padding-right: 8px !important; }
 th.col-days { font-family: inherit; font-size: 11px; }
+.grip {
+  flex-shrink: 0; width: 20px; height: 28px; padding: 0; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--color-neutral-500); cursor: grab; touch-action: none;
+}
+.grip:hover, .grip:focus-visible { color: var(--color-accent-700); }
+.grip:active { cursor: grabbing; }
+/* Touch screens can't drag rows: they get up / down buttons instead */
+.touch-move { display: none; flex-shrink: 0; }
+@media (pointer: coarse) {
+  .grip { display: none; }
+  .touch-move { display: flex; }
+}
+.week-table tr.is-dragging { opacity: 0.4; }
+.week-table tr.drop-before td { box-shadow: inset 0 2px 0 var(--color-accent); }
+.week-table tr.drop-after td { box-shadow: inset 0 -2px 0 var(--color-accent); }
 .cell { min-height: 32px; min-width: 84px; padding: 4px 24px 4px 8px; font-size: 13px; background-color: var(--color-bg); background-position: right 7px center; }
 .cell.is-off { background-color: transparent; color: var(--color-neutral-600); border-style: dashed; }
 
@@ -596,7 +709,7 @@ th.col-days { font-family: inherit; font-size: 11px; }
   .day-count { font-size: 10px; }
   .day-today { font-size: 8px; letter-spacing: 0.04em; }
   .copy { width: 100%; }
-  .col-name { width: 132px; max-width: 132px; }
+  .col-name { width: 176px; max-width: 176px; }
   .week-person .person-avatar { display: none; }
 }
 </style>
