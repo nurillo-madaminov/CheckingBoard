@@ -48,9 +48,42 @@ ALTER TABLE public.staff_profiles ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;
 -- manager = runs the whole team and does not check in / out
 ALTER TABLE public.staff_profiles DROP CONSTRAINT IF EXISTS staff_profiles_role_check;
 ALTER TABLE public.staff_profiles ADD CONSTRAINT staff_profiles_role_check CHECK (role IN ('staff', 'supervisor', 'manager'));
--- Work shift the manager assigned this person to (see save_shift_schedule)
-ALTER TABLE public.staff_profiles ADD COLUMN IF NOT EXISTS shift_code TEXT
-    CHECK (shift_code IN ('MORNING', 'AFTERNOON', 'NIGHT'));
+-- Weekly shift schedule: the shift each person works on each day of the week
+-- (see save_week_schedule). weekday 1 = Monday ... 7 = Sunday, the day the shift
+-- starts. One shift per person per day; a day without a row is a day off.
+CREATE TABLE IF NOT EXISTS public.shift_assignments (
+    team_id TEXT NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+    staff_id TEXT NOT NULL REFERENCES public.staff_profiles(id) ON DELETE CASCADE,
+    weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+    shift_code TEXT NOT NULL CHECK (shift_code IN ('MORNING', 'AFTERNOON', 'NIGHT')),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (staff_id, weekday)
+);
+CREATE INDEX IF NOT EXISTS shift_assignments_team_idx ON public.shift_assignments (team_id, weekday, shift_code);
+
+-- Earlier versions kept one shift per person for the whole week in
+-- staff_profiles.shift_code. Carry it over to all seven days, then drop the column.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'staff_profiles' AND column_name = 'shift_code'
+    ) THEN
+        EXECUTE $sql$
+            INSERT INTO public.shift_assignments (team_id, staff_id, weekday, shift_code)
+            SELECT p.team_id, p.id, d.weekday, p.shift_code
+            FROM public.staff_profiles p
+            CROSS JOIN generate_series(1, 7) AS d(weekday)
+            WHERE p.shift_code IS NOT NULL AND p.is_active AND p.team_id IS NOT NULL
+            ON CONFLICT DO NOTHING
+        $sql$;
+        -- The old policy reads the column; step 3 creates the new one
+        IF to_regclass('public.activities') IS NOT NULL THEN
+            DROP POLICY IF EXISTS "Staff read own and shift activities, managers read team" ON public.activities;
+        END IF;
+        ALTER TABLE public.staff_profiles DROP COLUMN shift_code;
+    END IF;
+END $$;
 -- Old scripts stored plain-text demo passwords here; passwords now live (hashed) in Supabase Auth.
 ALTER TABLE public.staff_profiles DROP COLUMN IF EXISTS password_hash;
 
@@ -166,15 +199,20 @@ AS $$
     )
 $$;
 
--- The signed-in member's current shift (activity visibility, shift-wide notifications)
-CREATE OR REPLACE FUNCTION public.current_shift_code()
-RETURNS TEXT
+-- Is this teammate scheduled on a shift: on the weekday of p_day, or on any day
+-- when p_day is left out (activity visibility, shift-wide notifications)
+CREATE OR REPLACE FUNCTION public.cb_on_shift(p_staff TEXT, p_shift TEXT, p_day DATE DEFAULT NULL)
+RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-    SELECT shift_code FROM public.staff_profiles
-    WHERE id = auth.uid()::text AND is_active
-    LIMIT 1
+    SELECT EXISTS (
+        SELECT 1 FROM public.shift_assignments a
+        WHERE a.staff_id = p_staff
+          AND a.team_id = public.current_team_id()
+          AND a.shift_code = p_shift
+          AND (p_day IS NULL OR a.weekday = extract(isodow FROM p_day)::int)
+    )
 $$;
 
 CREATE OR REPLACE FUNCTION public.login_email(p_username TEXT)
@@ -223,6 +261,13 @@ CREATE POLICY "Members read their team roster"
 
 -- Everyone in the team reads and edits companies / drivers and adds drivers;
 -- only managers add companies or remove either.
+-- The weekly schedule is read-only to clients; managers change it through save_week_schedule
+ALTER TABLE public.shift_assignments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Members read their team shift schedule" ON public.shift_assignments;
+CREATE POLICY "Members read their team shift schedule"
+    ON public.shift_assignments FOR SELECT TO authenticated
+    USING (team_id = public.current_team_id());
+
 CREATE POLICY "Members read their team companies"
     ON public.companies FOR SELECT TO authenticated
     USING (team_id = public.current_team_id());
@@ -270,8 +315,8 @@ CREATE POLICY "Managers remove drivers"
     ON public.drivers FOR DELETE TO authenticated
     USING (team_id = public.current_team_id() AND public.is_team_manager());
 
--- Staff read their own records and those their shift-mates logged on their shift
--- (credited to the shift they are on now, by someone on it now); managers read the whole team
+-- Staff read their own records and those their shift-mates logged on a shift they
+-- share (both scheduled on that shift on that day of the week); managers read the whole team
 CREATE POLICY "Staff read own and shift activities, managers read team"
     ON public.activities FOR SELECT TO authenticated
     USING (
@@ -280,13 +325,8 @@ CREATE POLICY "Staff read own and shift activities, managers read team"
             staff_user_id = auth.uid()::text
             OR public.is_team_manager()
             OR (
-                activities.shift_code = public.current_shift_code()
-                AND EXISTS (
-                    SELECT 1 FROM public.staff_profiles p
-                    WHERE p.id = activities.staff_user_id
-                      AND p.team_id = activities.team_id
-                      AND p.shift_code = activities.shift_code
-                )
+                public.cb_on_shift(auth.uid()::text, activities.shift_code, activities.shift_date)
+                AND public.cb_on_shift(activities.staff_user_id, activities.shift_code, activities.shift_date)
             )
         )
     );
@@ -309,12 +349,14 @@ CREATE POLICY "Members record activities as themselves"
 -- Shifts run on Tashkent time (UTC+5, no daylight saving). Default hours:
 --   MORNING 07:00-15:00, AFTERNOON 13:00-23:00, NIGHT 23:00-07:00
 -- A manager can change the hours of each shift, separately for each day of the
--- week (public.shift_hours; days without a row use the defaults).
--- An action is credited to the shift its author is assigned to; someone with no
--- assigned shift is placed by the clock (in an overlap, the earlier-starting shift wins).
+-- week (public.shift_hours; days without a row use the defaults), and schedules
+-- people on a shift day by day (public.shift_assignments).
+-- An action is credited to the shift its author is scheduled on that day; on a
+-- day off, or with no schedule, it is placed by the clock (in an overlap, the
+-- earlier-starting shift wins).
 -- The work day is the Tashkent date the shift starts on, so a shift that runs
 -- past midnight still belongs to the day it began. An action outside the hours
--- (early start, late finish) goes to the nearest run of the shift.
+-- (early start, late finish) goes to the nearest run the author is scheduled for.
 
 -- Custom hours, minutes after Tashkent midnight; weekday 1 = Monday ... 7 = Sunday
 -- of the day the shift starts. end_min <= start_min means it ends the next day.
@@ -382,6 +424,44 @@ AS $$
     LIMIT 1
 $$;
 
+-- The run of a person's own schedule a moment belongs to: of the runs they are
+-- scheduled for, the one that covers it (the earlier-starting one in an overlap),
+-- else the nearest one less than 12 hours away. Runs that start yesterday or today
+-- count, and tomorrow's once it is under 2 hours away (when check-in opens).
+-- No row: a day off, or no schedule.
+CREATE OR REPLACE FUNCTION public.cb_staff_shift_of(p_staff TEXT, p_team TEXT, p_at TIMESTAMPTZ)
+RETURNS TABLE (shift_code TEXT, shift_date DATE)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    WITH t AS (
+        SELECT p_at AT TIME ZONE 'Asia/Tashkent' AS ts
+    ), runs AS (
+        SELECT a.shift_code AS code, d.day, d.is_next,
+               d.day + make_interval(mins => h.start_min) AS starts,
+               d.day + make_interval(mins => h.end_min)
+                     + CASE WHEN h.end_min <= h.start_min THEN interval '1 day' ELSE interval '0' END AS ends
+        FROM t
+        CROSS JOIN LATERAL (VALUES (t.ts::date - 1, false), (t.ts::date, false), (t.ts::date + 1, true)) AS d(day, is_next)
+        JOIN public.shift_assignments a
+          ON a.staff_id = p_staff AND a.weekday = extract(isodow FROM d.day)::int
+        CROSS JOIN LATERAL public.cb_shift_hours(p_team, a.shift_code, d.day) AS h
+    ), ranked AS (
+        SELECT r.code, r.day, r.starts,
+               CASE
+                   WHEN t.ts >= r.ends THEN t.ts - r.ends + interval '1 microsecond'
+                   WHEN t.ts < r.starts THEN r.starts - t.ts
+                   ELSE interval '0'
+               END AS distance
+        FROM runs r, t
+        WHERE NOT r.is_next OR r.starts - t.ts <= interval '2 hours'
+    )
+    SELECT code, day FROM ranked
+    WHERE distance < interval '12 hours'
+    ORDER BY distance, starts
+    LIMIT 1
+$$;
+
 CREATE OR REPLACE FUNCTION public.activities_stamp_actor()
 RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER
@@ -401,7 +481,7 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    SELECT id, display_name, team_id, shift_code INTO me
+    SELECT id, display_name, team_id INTO me
     FROM public.staff_profiles
     WHERE id = auth.uid()::text AND is_active;
 
@@ -414,8 +494,13 @@ BEGIN
     NEW.team_id := me.team_id;
     NEW.action_at := NOW();
     NEW.created_at := NOW();
+    -- Their scheduled shift; on a day off (or with no schedule), by the clock
     SELECT s.shift_code, s.shift_date INTO NEW.shift_code, NEW.shift_date
-    FROM public.cb_shift_of(NOW(), me.shift_code, me.team_id) s;
+    FROM public.cb_staff_shift_of(me.id, me.team_id, NOW()) s;
+    IF NEW.shift_date IS NULL THEN
+        SELECT s.shift_code, s.shift_date INTO NEW.shift_code, NEW.shift_date
+        FROM public.cb_shift_of(NOW(), NULL, me.team_id) s;
+    END IF;
     IF NEW.id IS NULL OR NEW.id = '' THEN
         NEW.id := 'act-' || replace(gen_random_uuid()::text, '-', '');
     END IF;
@@ -639,13 +724,14 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
     PERFORM public._cb_assert_manages(p_staff_id);
-    -- A deactivated member leaves their shift (so they drop out of shift lists,
-    -- shift-mate visibility and reminders); reactivating does not restore it
     UPDATE public.staff_profiles
-    SET is_active = p_active,
-        shift_code = CASE WHEN p_active THEN shift_code ELSE NULL END,
-        updated_at = NOW()
+    SET is_active = p_active, updated_at = NOW()
     WHERE id = p_staff_id;
+    -- A deactivated member leaves the schedule (so they drop out of shift lists,
+    -- shift-mate visibility and reminders); reactivating does not restore it
+    IF NOT p_active THEN
+        DELETE FROM public.shift_assignments WHERE staff_id = p_staff_id;
+    END IF;
     -- Block (or unblock) the login itself; history is never touched
     UPDATE auth.users
     SET banned_until = CASE WHEN p_active THEN NULL ELSE NOW() + INTERVAL '100 years' END,
@@ -662,7 +748,9 @@ END;
 $$;
 
 -- Earlier versions left deactivated members on their shift
-UPDATE public.staff_profiles SET shift_code = NULL WHERE NOT is_active AND shift_code IS NOT NULL;
+DELETE FROM public.shift_assignments a
+USING public.staff_profiles p
+WHERE p.id = a.staff_id AND NOT p.is_active;
 
 -- Any member can rename themselves (past activity snapshots keep the old name)
 CREATE OR REPLACE FUNCTION public.update_my_display_name(p_display_name TEXT)
@@ -781,53 +869,52 @@ BEGIN
 END;
 $$;
 
--- Manager sets the whole shift schedule at once:
---   {"MORNING": [staff ids], "AFTERNOON": [...], "NIGHT": [...]}
--- Any number of people per shift, one shift per person; anyone left out is unassigned.
-CREATE OR REPLACE FUNCTION public.save_shift_schedule(p_schedule JSONB)
+-- Manager replaces the team's weekly schedule:
+--   [{"staff_id": "...", "weekday": 1, "shift_code": "MORNING"}, ...]
+-- weekday 1 = Monday ... 7 = Sunday. Any number of people per shift and day, one
+-- shift per person per day; a day left out for someone is their day off.
+-- (The old save_shift_schedule took one list of people per shift for the whole week.)
+DROP FUNCTION IF EXISTS public.save_shift_schedule(JSONB);
+
+CREATE OR REPLACE FUNCTION public.save_week_schedule(p_schedule JSONB)
 RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_team TEXT := public.current_team_id();
-    v_shift TEXT;
-    v_ids TEXT[];
-    v_all TEXT[] := '{}';
 BEGIN
     IF NOT public.is_team_manager() THEN
         RAISE EXCEPTION 'Only managers can change the shift schedule' USING ERRCODE = '42501';
     END IF;
-
-    FOREACH v_shift IN ARRAY ARRAY['MORNING', 'AFTERNOON', 'NIGHT'] LOOP
-        v_ids := ARRAY(SELECT jsonb_array_elements_text(coalesce(p_schedule -> v_shift, '[]'::jsonb)));
-        IF v_ids && v_all THEN
-            RAISE EXCEPTION 'A person can be on only one shift';
-        END IF;
-        v_all := v_all || v_ids;
-    END LOOP;
+    IF jsonb_typeof(coalesce(p_schedule, '[]'::jsonb)) <> 'array' THEN
+        RAISE EXCEPTION 'The shift schedule must be a list';
+    END IF;
 
     IF EXISTS (
-        SELECT 1 FROM unnest(v_all) AS u(staff_id)
+        SELECT 1 FROM jsonb_to_recordset(coalesce(p_schedule, '[]'::jsonb))
+            AS r(staff_id TEXT, weekday INT, shift_code TEXT)
+        GROUP BY r.staff_id, r.weekday HAVING count(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'A person can be on only one shift a day';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_to_recordset(coalesce(p_schedule, '[]'::jsonb))
+            AS r(staff_id TEXT, weekday INT, shift_code TEXT)
         WHERE NOT EXISTS (
             SELECT 1 FROM public.staff_profiles p
-            WHERE p.id = u.staff_id AND p.team_id = v_team AND p.is_active
+            WHERE p.id = r.staff_id AND p.team_id = v_team AND p.is_active
         )
     ) THEN
         RAISE EXCEPTION 'Only active members of your team can be scheduled';
     END IF;
 
-    UPDATE public.staff_profiles
-    SET shift_code = NULL, updated_at = NOW()
-    WHERE team_id = v_team AND shift_code IS NOT NULL AND NOT (id = ANY (v_all));
-
-    FOREACH v_shift IN ARRAY ARRAY['MORNING', 'AFTERNOON', 'NIGHT'] LOOP
-        UPDATE public.staff_profiles
-        SET shift_code = v_shift, updated_at = NOW()
-        WHERE team_id = v_team
-          AND shift_code IS DISTINCT FROM v_shift
-          AND id = ANY (ARRAY(SELECT jsonb_array_elements_text(coalesce(p_schedule -> v_shift, '[]'::jsonb))));
-    END LOOP;
+    DELETE FROM public.shift_assignments WHERE team_id = v_team;
+    -- The table checks reject unknown shifts and days
+    INSERT INTO public.shift_assignments (team_id, staff_id, weekday, shift_code)
+    SELECT v_team, r.staff_id, r.weekday, r.shift_code
+    FROM jsonb_to_recordset(coalesce(p_schedule, '[]'::jsonb))
+        AS r(staff_id TEXT, weekday INT, shift_code TEXT);
 END;
 $$;
 
@@ -895,13 +982,17 @@ $$;
 -- Who can call what
 REVOKE ALL ON FUNCTION public.run_daily_sign_reset() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.run_daily_sign_reset() TO authenticated;
-REVOKE ALL ON FUNCTION public.save_shift_schedule(JSONB) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.save_shift_schedule(JSONB) TO authenticated;
+REVOKE ALL ON FUNCTION public.save_week_schedule(JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_week_schedule(JSONB) TO authenticated;
 REVOKE ALL ON FUNCTION public.save_shift_hours(JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_shift_hours(JSONB) TO authenticated;
 -- Internal: only the activity trigger places actions in shifts
 REVOKE ALL ON FUNCTION public.cb_shift_hours(TEXT, TEXT, DATE) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.cb_shift_of(TIMESTAMPTZ, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.cb_staff_shift_of(TEXT, TEXT, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+-- Used by row security, so signed-in members must be able to call it
+REVOKE ALL ON FUNCTION public.cb_on_shift(TEXT, TEXT, DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.cb_on_shift(TEXT, TEXT, DATE) TO authenticated;
 REVOKE ALL ON FUNCTION public.save_driver_order(JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_driver_order(JSONB) TO authenticated;
 REVOKE ALL ON FUNCTION public.save_company_order(JSONB) FROM PUBLIC, anon;
@@ -934,9 +1025,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.companies, public.drivers TO auth
 GRANT SELECT, INSERT ON public.activities TO authenticated;
 REVOKE INSERT, UPDATE, DELETE ON public.teams, public.staff_profiles FROM authenticated;
 REVOKE UPDATE, DELETE, TRUNCATE ON public.activities FROM authenticated;
-REVOKE ALL ON public.shift_hours FROM anon;
-GRANT SELECT ON public.shift_hours TO authenticated;
-REVOKE INSERT, UPDATE, DELETE ON public.shift_hours FROM authenticated;
+REVOKE ALL ON public.shift_hours, public.shift_assignments FROM anon;
+GRANT SELECT ON public.shift_hours, public.shift_assignments TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.shift_hours, public.shift_assignments FROM authenticated;
 
 -- ------------------------------------------------------------------------------
 -- 7. REALTIME (live sync between dispatchers)
@@ -964,9 +1055,9 @@ END $$;
 -- ------------------------------------------------------------------------------
 -- 7B. NOTIFICATIONS (manager -> staff) AND EXTENSIONS (manager publishes, team downloads)
 -- ------------------------------------------------------------------------------
--- (public.current_shift_code() is defined with the session helpers in step 2)
+-- (public.cb_on_shift() is defined with the session helpers in step 2)
 
--- audience: ALL = whole team, SHIFT = everyone on audience_shift, STAFF = one person
+-- audience: ALL = whole team, SHIFT = everyone scheduled on audience_shift on any day, STAFF = one person
 CREATE TABLE IF NOT EXISTS public.notifications (
     id TEXT PRIMARY KEY DEFAULT ('ntf-' || replace(gen_random_uuid()::text, '-', '')),
     team_id TEXT NOT NULL DEFAULT public.current_team_id(),
@@ -1031,7 +1122,7 @@ CREATE POLICY "Members read notifications meant for them"
             public.is_team_manager()
             OR audience = 'ALL'
             OR (audience = 'STAFF' AND audience_staff_id = auth.uid()::text)
-            OR (audience = 'SHIFT' AND audience_shift = public.current_shift_code())
+            OR (audience = 'SHIFT' AND public.cb_on_shift(auth.uid()::text, audience_shift))
         )
     );
 
@@ -1117,8 +1208,8 @@ REVOKE ALL ON public.notifications, public.notification_reads, public.extensions
 GRANT SELECT, INSERT, DELETE ON public.notifications TO authenticated;
 GRANT SELECT, INSERT ON public.notification_reads TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.extensions TO authenticated;
-REVOKE ALL ON FUNCTION public.current_shift_code() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.current_shift_code() TO authenticated;
+-- Replaced by cb_on_shift (a person's shift now depends on the day)
+DROP FUNCTION IF EXISTS public.current_shift_code();
 
 -- Private storage bucket for extension files: <team_id>/<file>, 50 MB each
 INSERT INTO storage.buckets (id, name, public, file_size_limit)
@@ -1388,20 +1479,23 @@ DECLARE
     v_grace INT;
     v_row public.attendance;
 BEGIN
-    SELECT id, display_name, team_id, shift_code INTO me
+    SELECT id, display_name, team_id INTO me
     FROM public.staff_profiles WHERE id = auth.uid()::text AND is_active;
     IF me.id IS NULL THEN
         RAISE EXCEPTION 'Your account is not active in any team' USING ERRCODE = '42501';
     END IF;
-    IF me.shift_code IS NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.shift_assignments WHERE staff_id = me.id) THEN
         RAISE EXCEPTION 'You are not on a shift yet. Ask your manager to add you to one.';
     END IF;
     IF (public._cb_open_attendance(me.id)).id IS NOT NULL THEN
         RAISE EXCEPTION 'You are already checked in. Check out first.';
     END IF;
 
-    -- The run of your shift this belongs to (same rule as activities), and its hours
-    SELECT s.shift_code, s.shift_date INTO v_code, v_day FROM public.cb_shift_of(v_now, me.shift_code, me.team_id) s;
+    -- The run of your schedule this belongs to (same rule as activities), and its hours
+    SELECT s.shift_code, s.shift_date INTO v_code, v_day FROM public.cb_staff_shift_of(me.id, me.team_id, v_now) s;
+    IF v_day IS NULL THEN
+        RAISE EXCEPTION 'You are off today. There is no shift to check in to.';
+    END IF;
     SELECT r.starts, r.ends INTO v_starts, v_ends FROM public.cb_shift_run(me.team_id, v_code, v_day) r;
     IF v_now < v_starts - interval '2 hours' THEN
         RAISE EXCEPTION 'Your shift starts at % (Tashkent). You can check in from %.',
@@ -1569,7 +1663,7 @@ END $$;
 -- Every minute pg_cron calls the shift-reminders Edge Function, which asks
 -- claim_shift_reminders() who is due and sends them a push alert. A manager turns
 -- reminders on or off for the whole team (set_shift_reminders). Who gets one:
---   * check-in: an active member on a shift who has not checked in to that run yet
+--   * check-in: an active member scheduled on a shift that day who has not checked in to that run yet
 --   * check-out: an active member who is checked in to that run and not out yet
 -- Each reminder is sent once (shift_reminders_sent). One-time setup: see
 -- setup_shift_reminders below and the README.
@@ -1625,7 +1719,7 @@ AS $$
     DELETE FROM public.shift_reminders_sent WHERE event_at < NOW() - interval '2 days';
 
     WITH due AS (
-        SELECT p.id AS staff_id, p.team_id, e.kind, p.shift_code, d.day AS shift_date, e.event_at
+        SELECT p.id AS staff_id, p.team_id, e.kind, sa.shift_code, d.day AS shift_date, e.event_at
         FROM public.staff_profiles p
         JOIN public.teams t ON t.id = p.team_id AND t.shift_reminders_enabled
         -- Runs that start yesterday, today or tomorrow (Tashkent): covers night shifts and midnight
@@ -1634,20 +1728,22 @@ AS $$
             ((NOW() AT TIME ZONE 'Asia/Tashkent')::date),
             ((NOW() AT TIME ZONE 'Asia/Tashkent')::date + 1)
         ) AS d(day)
-        CROSS JOIN LATERAL public.cb_shift_run(p.team_id, p.shift_code, d.day) AS r
+        -- Only the days they are scheduled: no reminders on a day off
+        JOIN public.shift_assignments sa
+          ON sa.staff_id = p.id AND sa.weekday = extract(isodow FROM d.day)::int
+        CROSS JOIN LATERAL public.cb_shift_run(p.team_id, sa.shift_code, d.day) AS r
         CROSS JOIN LATERAL (VALUES ('CHECK_IN', r.starts), ('CHECK_OUT', r.ends)) AS e(kind, event_at)
         WHERE p.is_active
-          AND p.shift_code IS NOT NULL
           AND p.role <> 'manager'               -- managers don't check in / out
           AND NOW() >= e.event_at - make_interval(mins => greatest(1, least(coalesce(p_lead_min, 2), 30)))
           AND NOW() < e.event_at
           AND CASE e.kind
                   WHEN 'CHECK_IN' THEN NOT EXISTS (
                       SELECT 1 FROM public.attendance a
-                      WHERE a.staff_id = p.id AND a.shift_date = d.day AND a.shift_code = p.shift_code)
+                      WHERE a.staff_id = p.id AND a.shift_date = d.day AND a.shift_code = sa.shift_code)
                   ELSE EXISTS (
                       SELECT 1 FROM public.attendance a
-                      WHERE a.staff_id = p.id AND a.shift_date = d.day AND a.shift_code = p.shift_code
+                      WHERE a.staff_id = p.id AND a.shift_date = d.day AND a.shift_code = sa.shift_code
                         AND a.check_out_at IS NULL)
               END
     ), claimed AS (

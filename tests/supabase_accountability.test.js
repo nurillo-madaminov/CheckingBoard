@@ -36,6 +36,10 @@ async function mustSignIn(username, password) {
 
 describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: !URL || !KEY ? 'TEST_SUPABASE_URL / TEST_SUPABASE_ANON_KEY not set' : false }, () => {
   const pw = 'pass-123456';
+  // Weekly schedule rows for save_week_schedule: { MORNING: [ids], ... } on the given weekdays (default: every day)
+  const week = (byShift, days = [1, 2, 3, 4, 5, 6, 7]) => Object.entries(byShift).flatMap(([shift_code, ids]) =>
+    ids.flatMap(staff_id => days.map(weekday => ({ staff_id, weekday, shift_code }))));
+  const scheduleOf = async (client, staffId) => ((await client.from('shift_assignments').select('weekday, shift_code').eq('staff_id', staffId).order('weekday')).data || []);
   let mgrA, staffA1, staffA2, mgrB;
   let staffA1Id, staffA2Id;
   let compA, drvA;
@@ -267,35 +271,49 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.equal(ok.error, null, ok.error?.message);
   });
 
-  test('16. Shift schedule: manager only, any number per shift, actions credited to the assigned shift', async () => {
+  test('16. Weekly schedule: manager only, any number per shift, one shift per person per day, days off', async () => {
     const john = await mustSignIn(uname('john'), pw);
     const monaId = (await mgrA.auth.getUser()).data.user.id;
 
-    const denied = await john.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id] } });
+    const denied = await john.rpc('save_week_schedule', { p_schedule: week({ MORNING: [staffA1Id] }) });
     assert.ok(denied.error, 'staff cannot change the schedule');
-    const three = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id, staffA2Id, monaId] } });
+    const three = await mgrA.rpc('save_week_schedule', { p_schedule: week({ MORNING: [staffA1Id, staffA2Id, monaId] }) });
     assert.equal(three.error, null, three.error?.message);
-    const twice = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id], NIGHT: [staffA1Id] } });
-    assert.match(twice.error?.message || '', /only one shift/);
-    const foreign = await mgrB.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id] } });
+    const twice = await mgrA.rpc('save_week_schedule', { p_schedule: week({ MORNING: [staffA1Id], NIGHT: [staffA1Id] }) });
+    assert.match(twice.error?.message || '', /only one shift a day/);
+    const badDay = await mgrA.rpc('save_week_schedule', { p_schedule: week({ MORNING: [staffA1Id] }, [8]) });
+    assert.ok(badDay.error, 'weekday must be 1-7');
+    const oldShape = await mgrA.rpc('save_week_schedule', { p_schedule: { MORNING: [staffA1Id] } });
+    assert.match(oldShape.error?.message || '', /must be a list/);
+    const foreign = await mgrB.rpc('save_week_schedule', { p_schedule: week({ NIGHT: [staffA1Id] }) });
     assert.ok(foreign.error, 'cannot schedule another team');
 
-    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id], AFTERNOON: [staffA2Id] } });
+    let r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ NIGHT: [staffA1Id], AFTERNOON: [staffA2Id] }) });
     assert.equal(r.error, null, r.error?.message);
-    const { data: prof } = await mgrA.from('staff_profiles').select('id, shift_code').in('id', [staffA1Id, staffA2Id]);
-    assert.equal(prof.find(p => p.id === staffA1Id).shift_code, 'NIGHT');
-    assert.equal(prof.find(p => p.id === staffA2Id).shift_code, 'AFTERNOON');
+    const johnWeek = await scheduleOf(john, staffA1Id);
+    assert.equal(johnWeek.length, 7, 'staff read the team schedule');
+    assert.ok(johnWeek.every(d => d.shift_code === 'NIGHT'));
+    assert.ok((await scheduleOf(mgrA, staffA2Id)).every(d => d.shift_code === 'AFTERNOON'));
+    assert.equal((await mgrB.from('shift_assignments').select('staff_id')).data.length, 0, 'other teams see nothing');
+    const direct = await john.from('shift_assignments').insert({ team_id: 'x', staff_id: staffA1Id, weekday: 1, shift_code: 'MORNING' });
+    assert.ok(direct.error, 'no direct writes');
 
     const act = await john.from('activities').insert({ action_type: 'SHIFT', shift_code: 'MORNING', shift_date: '2020-01-01' }).select().single();
     assert.equal(act.error, null, act.error?.message);
     assert.equal(act.data.shift_code, 'NIGHT', 'shift comes from the assignment, not the client');
     assert.notEqual(act.data.shift_date, '2020-01-01');
 
-    // Leaving someone out unassigns them
-    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA2Id] } });
+    // A different shift on different days, and days off (Saturday and Sunday left out)
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: [
+      ...week({ MORNING: [staffA1Id] }, [1, 2, 3]), ...week({ NIGHT: [staffA1Id] }, [4, 5]), ...week({ AFTERNOON: [staffA2Id] })
+    ] });
     assert.equal(r.error, null, r.error?.message);
-    const after = await mgrA.from('staff_profiles').select('shift_code').eq('id', staffA1Id).single();
-    assert.equal(after.data.shift_code, null);
+    assert.deepEqual((await scheduleOf(mgrA, staffA1Id)).map(d => `${d.weekday}${d.shift_code[0]}`), ['1M', '2M', '3M', '4N', '5N']);
+
+    // Leaving someone out takes them off the schedule
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA2Id] }) });
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal((await scheduleOf(mgrA, staffA1Id)).length, 0);
   });
 
   test('16b. Shift hours: manager sets them per weekday; staff read them; other teams see nothing', async () => {
@@ -340,7 +358,7 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     const leo = await mustSignIn(uname('leo'), pw);
     const sees = async (client, id) => ((await client.from('activities').select('id').eq('id', id)).data || []).length === 1;
 
-    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id, kateId], MORNING: [leoId] } });
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ NIGHT: [staffA1Id, kateId], MORNING: [leoId] }) });
     assert.equal(r.error, null, r.error?.message);
     const kateAct = (await kate.from('activities').insert({ driver_id: drvA, action_type: 'CYCLE' }).select().single()).data;
     const leoAct = (await leo.from('activities').insert({ driver_id: drvA, action_type: 'BREAK' }).select().single()).data;
@@ -352,13 +370,13 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     assert.ok(!(await sees(kate, leoAct.id)));
 
     // Moving Kate off the night shift takes her records out of John's view; she keeps her own
-    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id], MORNING: [kateId, leoId] } });
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ NIGHT: [staffA1Id], MORNING: [kateId, leoId] }) });
     assert.equal(r.error, null, r.error?.message);
     assert.ok(!(await sees(john, kateAct.id)), 'no longer a shift-mate');
     assert.ok(await sees(kate, kateAct.id), 'own records stay visible');
 
     // Unassigned staff see only their own
-    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { NIGHT: [staffA1Id] } });
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ NIGHT: [staffA1Id] }) });
     assert.equal(r.error, null, r.error?.message);
     const leoSees = (await leo.from('activities').select('staff_user_id')).data;
     assert.ok(leoSees.every(a => a.staff_user_id === leoId), 'unassigned: own records only');
@@ -366,7 +384,7 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
 
   test('17. Notifications: managers send; staff see only what is addressed to them', async () => {
     const john = await mustSignIn(uname('john'), pw);
-    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { MORNING: [staffA1Id] } });
+    let r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ MORNING: [staffA1Id] }) });
     assert.equal(r.error, null, r.error?.message);
 
     const denied = await john.from('notifications').insert({ title: 'Staff cannot send' });
@@ -531,7 +549,7 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
   test('25. Check-in / check-out: office radius enforced, time and lateness from the server', async () => {
     const john = await mustSignIn(uname('john'), pw);
     // John on AFTERNOON, which started 30 minutes ago today (late: 30 > 15)
-    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id] } });
+    let r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA1Id] }) });
     assert.equal(r.error, null, r.error?.message);
     r = await mgrA.rpc('save_shift_hours', { p_hours: startedAgo('AFTERNOON', 30) });
     assert.equal(r.error, null, r.error?.message);
@@ -580,13 +598,20 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     const john = await mustSignIn(uname('john'), pw);
     const kateId = (await kate.auth.getUser()).data.user.id;
     // Kate unassigned first
-    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id] } });
+    let r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA1Id] }) });
     assert.equal(r.error, null, r.error?.message);
     const unassigned = await kate.rpc('check_in', atOffice);
     assert.match(unassigned.error?.message || '', /not on a shift/);
 
+    // Kate scheduled only on a day three days from now: today is her day off
+    const tashkentIso = new Date(Date.now() + 5 * 3600e3).getUTCDay() || 7;
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: [...week({ AFTERNOON: [staffA1Id] }), ...week({ NIGHT: [kateId] }, [(tashkentIso + 2) % 7 + 1])] });
+    assert.equal(r.error, null, r.error?.message);
+    const dayOff = await kate.rpc('check_in', atOffice);
+    assert.match(dayOff.error?.message || '', /off today/);
+
     // Kate on NIGHT, which started 5 minutes ago: on time
-    r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id], NIGHT: [kateId] } });
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA1Id], NIGHT: [kateId] }) });
     assert.equal(r.error, null, r.error?.message);
     r = await mgrA.rpc('save_shift_hours', { p_hours: [...startedAgo('AFTERNOON', 30), ...startedAgo('NIGHT', 5)] });
     assert.equal(r.error, null, r.error?.message);
@@ -668,7 +693,7 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
   test('29. Deactivating someone takes them off their shift and removes their phones', async () => {
     let kate = await mustSignIn(uname('kate'), pw);
     const kateId = (await kate.auth.getUser()).data.user.id;
-    let r = await mgrA.rpc('save_shift_schedule', { p_schedule: { AFTERNOON: [staffA1Id], MORNING: [kateId] } });
+    let r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA1Id], MORNING: [kateId] }) });
     assert.equal(r.error, null, r.error?.message);
     const sub = { p_endpoint: `https://push.example.com/deact-${run}`, p_p256dh: 'BKey', p_auth: 'secret', p_user_agent: 'test' };
     r = await kate.rpc('save_push_subscription', sub);
@@ -676,17 +701,16 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
 
     r = await mgrA.rpc('set_staff_active', { p_staff_id: kateId, p_active: false });
     assert.equal(r.error, null, r.error?.message);
-    const { data: profile } = await mgrA.from('staff_profiles').select('is_active, shift_code').eq('id', kateId).single();
+    const { data: profile } = await mgrA.from('staff_profiles').select('is_active').eq('id', kateId).single();
     assert.equal(profile.is_active, false);
-    assert.equal(profile.shift_code, null, 'no longer on a shift');
+    assert.equal((await scheduleOf(mgrA, kateId)).length, 0, 'no longer on the schedule');
 
     r = await mgrA.rpc('set_staff_active', { p_staff_id: kateId, p_active: true });
     assert.equal(r.error, null, r.error?.message);
     kate = await mustSignIn(uname('kate'), pw);
     const subs = await kate.from('push_subscriptions').select('endpoint').eq('endpoint', sub.p_endpoint);
     assert.equal(subs.data.length, 0, 'phone alerts were removed');
-    const again = (await mgrA.from('staff_profiles').select('shift_code').eq('id', kateId).single()).data;
-    assert.equal(again.shift_code, null, 'reactivating does not put them back on a shift');
+    assert.equal((await scheduleOf(mgrA, kateId)).length, 0, 'reactivating does not put them back on the schedule');
   });
 
   test('30. Members change their own username; they sign in with the new one', async () => {

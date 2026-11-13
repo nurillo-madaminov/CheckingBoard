@@ -4,7 +4,11 @@
       <span class="cb-label">{{ teamName || 'Your team' }}</span>
       <template v-if="myShift">
         <span class="title">{{ getShiftConfig(myShift).label }} shift</span>
-        <span class="cb-sub">{{ hoursToday }} today (Tashkent) · {{ shiftMates.length + 1 }} {{ shiftMates.length ? 'people' : 'person' }}</span>
+        <span class="cb-sub">{{ hoursToday }} {{ myRun.day === today ? 'today' : formatWorkDayShort(myRun.day) }} (Tashkent) · {{ shiftMates.length + 1 }} {{ shiftMates.length ? 'people' : 'person' }}</span>
+      </template>
+      <template v-else-if="nextRun">
+        <span class="title">Day off</span>
+        <span class="cb-sub">Next: {{ getShiftConfig(nextRun.code).label }} shift, {{ formatWorkDayShort(nextRun.day) }} · {{ shiftHours(nextRun.code, nextRun.day).tashkent }} (Tashkent)</span>
       </template>
       <template v-else>
         <span class="title">No shift yet</span>
@@ -13,7 +17,7 @@
     </div>
 
     <section v-if="myShift" class="group">
-      <span class="cb-label">On your shift</span>
+      <span class="cb-label">On your shift {{ myRun.day === today ? 'today' : `· ${formatWorkDayShort(myRun.day)}` }}</span>
       <div class="cb-panel list">
         <div class="person is-me">
           <span class="cb-avatar avatar">{{ initials(me?.displayName) }}</span>
@@ -34,7 +38,7 @@
         <div v-for="p in managers" :key="p.id" class="person">
           <span class="cb-avatar avatar is-manager">{{ initials(p.displayName) }}</span>
           <span class="name cb-ellipsis">{{ p.displayName }}</span>
-          <span class="meta">{{ roleLabel(p.role) }}<template v-if="p.shiftCode"> · {{ getShiftConfig(p.shiftCode).label }}</template></span>
+          <span class="meta">{{ roleLabel(p.role) }}<template v-if="shiftOn(p.id, today)"> · {{ getShiftConfig(shiftOn(p.id, today)).label }}</template></span>
         </div>
         <div v-if="!managers.length" class="empty">No managers listed.</div>
       </div>
@@ -43,25 +47,36 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { currentStaffUser, currentTeam, staffProfiles, loadTeamRoster } from '../services/authService';
-import { getShiftConfig, shiftHours, placeShift } from '../config/shifts';
+import {
+  getShiftConfig, shiftHours, shiftOn, placeStaffShift, nextStaffShift, currentWorkDay, formatWorkDayShort
+} from '../config/shifts';
 import { initials } from '../utils/format';
 import { canManage, roleLabel } from '../config/roles';
 
 const teamName = computed(() => currentTeam.value?.name || '');
 const me = computed(() => staffProfiles.value.find(p => p.id === currentStaffUser.value?.id) || currentStaffUser.value);
-const myShift = computed(() => me.value?.shiftCode || '');
+const now = ref(new Date());
+const today = computed(() => currentWorkDay(now.value));
+// The run of my schedule that is on (or nearest) now; null on my day off
+const myRun = computed(() => placeStaffShift(now.value, me.value?.id));
+const myShift = computed(() => myRun.value?.code || '');
+const nextRun = computed(() => (myRun.value ? null : nextStaffShift(now.value, me.value?.id)));
 const active = computed(() => staffProfiles.value.filter(p => p.isActive));
-const shiftMates = computed(() => active.value.filter(p => p.shiftCode === myShift.value && p.id !== me.value?.id));
+// Whoever is scheduled on the same shift that day
+const shiftMates = computed(() => active.value.filter(p =>
+  myRun.value && p.id !== me.value?.id && shiftOn(p.id, myRun.value.day) === myShift.value
+));
 const managers = computed(() => active.value.filter(p => canManage(p.role) && p.id !== me.value?.id));
-const hoursToday = computed(() => {
-  if (!myShift.value) return '';
-  const run = placeShift(new Date(), myShift.value);
-  return shiftHours(myShift.value, run.day).tashkent;
-});
+const hoursToday = computed(() => (myRun.value ? shiftHours(myShift.value, myRun.value.day).tashkent : ''));
 
-onMounted(() => loadTeamRoster().catch(() => {}));
+let timer = null;
+onMounted(() => {
+  loadTeamRoster().catch(() => {});
+  timer = setInterval(() => { now.value = new Date(); }, 60000);
+});
+onUnmounted(() => clearInterval(timer));
 </script>
 
 <style scoped>

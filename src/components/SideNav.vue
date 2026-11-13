@@ -111,7 +111,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { getShiftConfig, shiftProgress, shiftHours, clockTashkent, clockEastern } from '../config/shifts';
+import { getShiftConfig, shiftProgress, shiftHours, shiftOn, hasSchedule, clockTashkent, clockEastern } from '../config/shifts';
 import { initials } from '../utils/format';
 import { canManage, roleLabel } from '../config/roles';
 
@@ -152,7 +152,9 @@ const onlineStaff = computed(() => {
   return props.roster
     .filter(p => p.isActive && props.onlineIds.has(p.id))
     .map(p => {
-      const onDuty = p.shiftCode === duty.value.code;
+      // Their shift on the work day of the shift on duty ('' on a day off)
+      const shiftToday = shiftOn(p.id, day);
+      const onDuty = shiftToday === duty.value.code;
       const count = props.todayActivities.filter(a =>
         a.staff_user_id === p.id && a.shift_code === duty.value.code && a.shift_date === day
       ).length;
@@ -163,7 +165,7 @@ const onlineStaff = computed(() => {
         onDuty,
         detail: onDuty
           ? `${count} ${count === 1 ? 'action' : 'actions'} this shift`
-          : (p.shiftCode ? `${getShiftConfig(p.shiftCode).label} shift` : roleLabel(p.role))
+          : (shiftToday ? `${getShiftConfig(shiftToday).label} shift` : hasSchedule(p.id) ? 'Day off' : roleLabel(p.role))
       };
     })
     .sort((a, b) => (b.onDuty - a.onDuty) || a.name.localeCompare(b.name));
