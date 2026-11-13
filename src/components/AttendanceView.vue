@@ -1,9 +1,9 @@
 <template>
-  <!-- A section of the Team page -->
+  <!-- A tab of the Staff page -->
   <div class="attendance">
     <div class="cb-page-head">
       <div class="title-block">
-        <span class="cb-sub">Phone check-ins and check-outs · late = more than {{ lateAfter }} min after the shift starts</span>
+        <span class="cb-sub">Phone check-ins and check-outs · late = more than {{ lateAfter }} min after the shift starts (change it in Settings)</span>
       </div>
       <div class="cb-spacer"></div>
 
@@ -22,20 +22,6 @@
         <option value="">Everyone</option>
         <option v-for="p in people" :key="p.id" :value="p.id">{{ p.name }}</option>
       </select>
-
-      <!-- Late rule -->
-      <form class="rule" @submit.prevent="saveRule">
-        <label for="late-after">Late after</label>
-        <input id="late-after" v-model.number="lateDraft" type="number" min="0" max="240" step="1" class="input compact rule-input" />
-        <span class="cb-sub">min</span>
-        <button type="submit" class="btn btn-secondary" :disabled="lateDraft === lateAfter || isSaving">Save</button>
-      </form>
-
-      <!-- Phone reminders 2 minutes before each shift starts / ends -->
-      <label v-if="reminders !== null" class="reminders" title="Phone alert to each person 2 minutes before their shift starts (check in) and ends (check out)">
-        <input type="checkbox" :checked="reminders" :disabled="isSavingReminders" @change="saveReminders($event.target.checked)" />
-        <span>Check-in / out reminders</span>
-      </label>
     </div>
 
     <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
@@ -101,7 +87,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import {
-  fetchAttendance, fetchAttendanceRules, setLateAfter, fetchShiftReminders, setShiftReminders, formatMinutesSpan
+  fetchAttendance, fetchAttendanceRules, formatMinutesSpan
 } from '../services/attendanceService';
 import { staffProfiles, loadTeamRoster } from '../services/authService';
 import {
@@ -113,19 +99,13 @@ const props = defineProps({
   // Bumped by the app when a check-in / check-out arrives live
   refreshKey: { type: Number, default: 0 }
 });
-const emit = defineEmits(['saved', 'error']);
 
 const thisMonth = currentWorkDay().slice(0, 7);
 const month = ref(thisMonth); // 'YYYY-MM'
 const staffFilter = ref('');
 const rows = ref([]);
 const lateAfter = ref(15);
-const lateDraft = ref(15);
 const isLoading = ref(false);
-const isSaving = ref(false);
-// null until loaded (or when the database script hasn't been re-run): the switch stays hidden
-const reminders = ref(null);
-const isSavingReminders = ref(false);
 const errorMessage = ref('');
 let loadSeq = 0;
 
@@ -185,7 +165,6 @@ async function load() {
     if (seq !== loadSeq) return;
     rows.value = list;
     lateAfter.value = rules.lateAfterMin;
-    if (!isSaving.value) lateDraft.value = rules.lateAfterMin;
   } catch (err) {
     if (seq === loadSeq) errorMessage.value = err.message;
   } finally {
@@ -193,52 +172,9 @@ async function load() {
   }
 }
 
-async function saveRule() {
-  const n = Math.round(Number(lateDraft.value));
-  if (!Number.isFinite(n) || n < 0 || n > 240) {
-    errorMessage.value = 'Late after must be between 0 and 240 minutes.';
-    return;
-  }
-  isSaving.value = true;
-  try {
-    await setLateAfter(n);
-    emit('saved', { title: 'Late rule saved', message: `Check-ins more than ${n} min after the start are late` });
-  } catch (err) {
-    emit('error', { title: 'Late rule not saved', message: err.message });
-  } finally {
-    isSaving.value = false;
-    await load();
-  }
-}
-
-async function loadReminders() {
-  try {
-    reminders.value = await fetchShiftReminders();
-  } catch (err) {
-    reminders.value = null;
-    console.warn('Could not load the reminder setting:', err);
-  }
-}
-
-async function saveReminders(on) {
-  isSavingReminders.value = true;
-  try {
-    await setShiftReminders(on);
-    emit('saved', on
-      ? { title: 'Reminders on', message: 'Phone alert 2 min before each shift starts and ends' }
-      : { title: 'Reminders off', message: 'No check-in / check-out reminders' });
-  } catch (err) {
-    emit('error', { title: 'Reminder setting not saved', message: err.message });
-  } finally {
-    isSavingReminders.value = false;
-    await loadReminders();
-  }
-}
-
 watch(() => [month.value, props.refreshKey], load);
 onMounted(() => {
   load();
-  loadReminders();
   loadTeamRoster().catch(() => {});
 });
 </script>

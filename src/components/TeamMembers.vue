@@ -34,7 +34,7 @@
               {{ profile.isActive ? 'Deactivate' : 'Activate' }}
             </button>
           </template>
-          <span v-else class="you">You · edit in Profile settings</span>
+          <span v-else class="you">You · edit in Settings › My account</span>
         </div>
 
         <form v-if="resetTargetId === profile.id" class="reset" @submit.prevent="submitPasswordReset(profile)">

@@ -1,8 +1,8 @@
 <template>
-  <div class="cb-page cb-scroll">
+  <div :class="embedded ? 'cb-embedded' : 'cb-page cb-scroll'">
     <div class="cb-page-head">
       <div class="title-block">
-        <h2 class="cb-title">Extensions</h2>
+        <h2 v-if="!embedded" class="cb-title">Extensions</h2>
         <span class="cb-sub">Browser extensions for this team. Download and set them up on any computer.</span>
       </div>
       <div class="cb-spacer"></div>
@@ -117,6 +117,8 @@ import {
 } from '../services/extensionService';
 
 const props = defineProps({
+  // Shown inside the Settings page (its header and tabs are above)
+  embedded: { type: Boolean, default: false },
   isManager: { type: Boolean, default: false },
   teamId: { type: String, required: true }
 });

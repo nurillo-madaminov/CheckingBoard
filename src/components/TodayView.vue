@@ -1,11 +1,12 @@
 <template>
-  <div class="cb-page cb-scroll today">
-    <div class="cb-page-head">
+  <div :class="embedded ? 'cb-embedded today' : 'cb-page cb-scroll today'">
+    <div v-if="!embedded" class="cb-page-head">
       <div class="title-block">
         <h2 class="cb-title">Today</h2>
         <span class="cb-sub">{{ dayLabel }} · {{ clockTas }} Tashkent · check-ins update live</span>
       </div>
     </div>
+    <span v-else class="cb-sub">{{ dayLabel }} · {{ clockTas }} Tashkent · check-ins update live</span>
 
     <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
@@ -76,6 +77,8 @@ import { checksIn, roleLabel } from '../config/roles';
 import { initials } from '../utils/format';
 
 const props = defineProps({
+  // Shown inside the Staff page (its header and tabs are above)
+  embedded: { type: Boolean, default: false },
   // Bumped by the app when a check-in / check-out arrives live
   refreshKey: { type: Number, default: 0 }
 });

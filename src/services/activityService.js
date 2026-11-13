@@ -59,7 +59,7 @@ export async function recordActivity({ driver = null, company = null, actionType
  * shift-mates' on their shift, and managers to their whole team; the filters
  * narrow it further.
  */
-export async function fetchActivities({ fromDate, toDate, shiftCode = '', staffUserId = '', actionType = '' } = {}) {
+export async function fetchActivities({ fromDate, toDate, shiftCode = '', staffUserId = '', actionType = '', driverId = '' } = {}) {
   return fetchAllRows(() => {
     let query = supabase
       .from('activities')
@@ -72,6 +72,7 @@ export async function fetchActivities({ fromDate, toDate, shiftCode = '', staffU
     if (shiftCode) query = query.eq('shift_code', shiftCode);
     if (staffUserId) query = query.eq('staff_user_id', staffUserId);
     if (actionType) query = query.eq('action_type', actionType);
+    if (driverId) query = query.eq('driver_id', driverId);
     return query;
   });
 }

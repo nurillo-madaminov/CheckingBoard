@@ -41,9 +41,29 @@ npm run build      # production build in dist/
 
 Double-clicking `start.bat` also runs the dev server.
 
+## 🧭 Where things are
+
+The sidebar has five sections, most used first:
+
+| Section | What is in it | Who |
+| --- | --- | --- |
+| **Board** | Live checking: status filters and *Needs attention* (overdue, no sign, flagged) above the table, a **Check** button on every row. Click a driver's name (or press Enter) to open their page: status, notes and recent actions. Add company, Reset fleet and Expand all are in the ⋯ menu. | Everyone |
+| **Fleet** | Every driver (inactive too) with filters and bulk actions; companies. | Managers, supervisors |
+| **Staff** | Today (who is in), Schedule, Attendance, Members. *Message staff* sends an alert to everyone, a shift or one person. | Managers, supervisors |
+| **Reports** | Activity (every action record) and Statistics; a day in Statistics opens its records. | Everyone (Statistics: managers) |
+| **Settings** | My account, Attendance rules (late after, reminders), Office location, Extensions. | Everyone (rules and office: managers) |
+
+Every page has the same layout: title and its one primary action at the top right, then tabs or
+filters, then the content. Board shortcuts: ↑ ↓ move, Enter open, C check, E edit, / search, Esc clear.
+On a driver page: C check, E edit, J / K next / previous, Esc back.
+
+The **phone app** is its own small flow: **Check in**, **My shifts** (the week, shift-mates and the
+reminder switch) and **Alerts** (messages from managers). Managers see **Today** instead of Check in.
+Name, password and sign out are behind the avatar.
+
 ## 🗓️ Shifts
 
-Managers plan the week on the **Shifts** page, day by day (Monday to Sunday): who works the
+Managers plan the week on **Staff › Schedule**, day by day (Monday to Sunday): who works the
 Morning, Afternoon and Night shift on each day, and each shift's hours on that day. One shift per
 person per day; a day without a shift is that person's **day off** (no check-in, no reminders).
 A shift can also be switched **off** on a day, e.g. only Morning and Night at the weekend, each
@@ -54,11 +74,11 @@ stretched to 12 hours.
 ## 📱 Phone app & shift reminders
 
 CheckingBoard installs on phones as an app (Android: **Install app**; iPhone: Safari → Share →
-**Add to Home Screen**). Staff and supervisors check in and out there; managers and supervisors
-see who is in today.
+**Add to Home Screen**). Staff and supervisors check in and out there and read alerts from managers;
+managers and supervisors see who is in today.
 
-Check-in works as soon as `supabase_schema.sql` has been re-run and a manager has set the office on
-the Shifts page. **Shift reminders** (phone push alerts) need a one-time setup:
+Check-in works as soon as `supabase_schema.sql` has been re-run and a manager has set the office in
+Settings › Office location. **Shift reminders** (phone push alerts) need a one-time setup:
 
 1. **Keys.** The public key goes in `.env` (and on your host, e.g. Vercel → Settings → Environment
    Variables, then redeploy):

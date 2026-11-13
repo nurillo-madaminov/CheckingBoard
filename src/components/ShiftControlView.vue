@@ -1,17 +1,12 @@
 <template>
-  <div class="cb-page cb-scroll">
-    <div class="cb-page-head">
-      <div class="title-block">
-        <h2 class="cb-title">Shifts</h2>
-        <span class="cb-sub">Plan the week day by day: which shifts run, their hours and who works them. A day without a shift is that person's day off.</span>
-      </div>
-      <div class="cb-spacer"></div>
-      <div class="head-actions">
-        <span v-if="isDirty" class="unsaved">Unsaved changes</span>
-        <button class="btn btn-secondary" :disabled="!isDirty || isSaving" @click="resetDraft">Discard</button>
-        <button class="btn btn-primary" :disabled="!isDirty || isSaving" @click="save">{{ isSaving ? 'Saving…' : 'Save schedule' }}</button>
-      </div>
-    </div>
+  <div class="cb-embedded">
+    <!-- The page's primary action: shown in the Staff page header -->
+    <Teleport to="#page-actions" defer>
+      <span v-if="isDirty" class="unsaved">Unsaved changes</span>
+      <button class="btn btn-secondary" :disabled="!isDirty || isSaving" @click="resetDraft">Discard</button>
+      <button class="btn btn-primary" :disabled="!isDirty || isSaving" @click="save">{{ isSaving ? 'Saving…' : 'Save schedule' }}</button>
+    </Teleport>
+    <span class="cb-sub">Plan the week day by day: which shifts run, their hours and who works them. A day without a shift is that person's day off.</span>
 
     <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
@@ -213,39 +208,24 @@
       <span class="cb-sub small">Actions are credited to the shift their author is scheduled on that day; on a day off they are placed by the clock (where shifts overlap, the one that started first counts). A shift ending at or before its start time ends the next day.</span>
     </div>
 
-    <!-- Managers only (the database rejects staff too) -->
-    <OfficeLocationCard
-      v-if="isManager && showOffice"
-      @saved="emit('office-saved', $event)"
-      @error="emit('office-error', $event)"
-    />
-    <span v-else-if="isManager" class="cb-sub small">The office location for check-in is set on the computer, on this Shifts page.</span>
+    <span class="cb-sub small">The office location and the late / reminder rules are in Settings.</span>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import {
   SHIFTS, WEEKDAYS, getShiftConfig, shiftHours, placeShift, currentWorkDay, addDays,
   isoWeekday, customShiftHours, shiftSchedule, formatMinutes, parseMinutes, formatWorkDayShort
 } from '../config/shifts';
 import {
-  staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours, saveScheduleOrder,
-  isCurrentUserManager
+  staffProfiles, loadTeamRoster, loadShiftHours, saveShiftSchedule, saveShiftHours, saveScheduleOrder
 } from '../services/authService';
 import { formatMinutesSpan } from '../services/attendanceService';
 import { initials } from '../utils/format';
-// Loaded on demand: the map library is only needed here, by managers
-const OfficeLocationCard = defineAsyncComponent(() => import('./OfficeLocationCard.vue'));
 
-defineProps({
-  // The office map is for the computer; the phone app leaves it out
-  showOffice: { type: Boolean, default: true }
-});
+const emit = defineEmits(['saved']);
 
-const emit = defineEmits(['saved', 'office-saved', 'office-error']);
-
-const isManager = computed(() => isCurrentUserManager());
 // Active people in the saved order: the manager's own order first, then anyone new by name
 const savedMembers = computed(() => staffProfiles.value
   .filter(p => p.isActive)
