@@ -339,6 +339,21 @@ describe('CheckingBoard Supabase: accounts, accountability, isolation', { skip: 
     const other = await mgrB.from('shift_hours').select('shift_code');
     assert.equal(other.data.length, 0, 'other teams see nothing');
 
+    // A shift can be turned off on a day (two 12-hour shifts at the weekend), but not all three
+    const off = (shift, weekday) => ({ shift_code: shift, weekday, start_min: 780, end_min: 1380, is_off: true });
+    const allOff = await mgrA.rpc('save_shift_hours', { p_hours: [off('MORNING', 6), off('AFTERNOON', 6), off('NIGHT', 6)] });
+    assert.match(allOff.error?.message || '', /At least one shift/);
+    r = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA2Id] }) });
+    assert.equal(r.error, null, r.error?.message);
+    r = await mgrA.rpc('save_shift_hours', { p_hours: [
+      { shift_code: 'MORNING', weekday: 6, start_min: 420, end_min: 1140 }, off('AFTERNOON', 6), { shift_code: 'NIGHT', weekday: 6, start_min: 1140, end_min: 420 }
+    ] });
+    assert.equal(r.error, null, r.error?.message);
+    assert.equal((await john.from('shift_hours').select('is_off').eq('shift_code', 'AFTERNOON').eq('weekday', 6).single()).data.is_off, true);
+    assert.deepEqual((await scheduleOf(mgrA, staffA2Id)).map(d => d.weekday), [1, 2, 3, 4, 5, 7], 'people on the turned-off shift get that day off');
+    const onOff = await mgrA.rpc('save_week_schedule', { p_schedule: week({ AFTERNOON: [staffA2Id] }, [6]) });
+    assert.match(onOff.error?.message || '', /does not run on that day/);
+
     // Saving replaces everything; an empty list goes back to the defaults
     r = await mgrA.rpc('save_shift_hours', { p_hours: [] });
     assert.equal(r.error, null, r.error?.message);

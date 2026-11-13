@@ -51,7 +51,7 @@
         <div class="shift-cards">
           <div v-for="s in SHIFTS" :key="s.code" class="cb-panel shift-card">
             <div class="shift-top">
-              <span class="shift-name">{{ s.label }} <span class="shift-hours">{{ shiftHours(s.code).tashkent }} Tashkent</span></span>
+              <span class="shift-name">{{ s.label }} <span class="shift-hours">{{ shiftRunsOn(s.code, currentWorkDay()) ? `${shiftHours(s.code).tashkent} Tashkent` : 'Not running today' }}</span></span>
               <span><span class="cb-num shift-total">{{ stats.byShift[s.code].total }}</span> <span class="cb-sub small">{{ shareOf(stats.byShift[s.code].total, stats.team.total) }} of all</span></span>
             </div>
             <div class="shift-acts">
@@ -97,6 +97,7 @@ import { staffProfiles, loadTeamRoster } from '../services/authService';
 import {
   SHIFTS,
   scheduleSummary,
+  shiftRunsOn,
   shiftHours,
   currentWorkDay,
   addDays,

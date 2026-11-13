@@ -121,7 +121,8 @@ export async function loadCurrentProfile() {
 export async function loadShiftHours() {
   const { data, error } = await supabase
     .from('shift_hours')
-    .select('shift_code, weekday, start_min, end_min');
+    // Every column: is_off is missing until the database script has been re-run
+    .select('*');
   if (error) {
     console.warn('Could not load shift hours, using the defaults:', error.message);
     setCustomShiftHours([]);
@@ -294,12 +295,13 @@ export async function saveShiftSchedule(rows) {
 }
 
 /**
- * Manager replaces the shift hours: [{ shift_code, weekday (1 = Monday), start_min, end_min }]
+ * Manager replaces the shift hours: [{ shift_code, weekday (1 = Monday), start_min, end_min, is_off }]
+ * (is_off: the shift does not run on that weekday)
  */
 export async function saveShiftHours(rows) {
   const { error } = await supabase.rpc('save_shift_hours', { p_hours: rows });
   if (error) {
-    if (/save_shift_hours/.test(error.message || '')) {
+    if (/save_shift_hours|is_off/.test(error.message || '')) {
       throw new Error('Custom shift hours need the updated database script. Run supabase_schema.sql in the Supabase SQL Editor, then try again.');
     }
     throw friendlyError(error, 'Failed to save the shift hours');

@@ -3,7 +3,7 @@
     <div class="cb-page-head">
       <div class="title-block">
         <h2 class="cb-title">Shifts</h2>
-        <span class="cb-sub">Plan the week day by day: who works each shift and its hours. A day without a shift is that person's day off.</span>
+        <span class="cb-sub">Plan the week day by day: which shifts run, their hours and who works them. A day without a shift is that person's day off.</span>
       </div>
       <div class="cb-spacer"></div>
       <div class="head-actions">
@@ -28,6 +28,7 @@
       >
         <span class="day-name"><span class="day-long">{{ day.label }}</span><span class="day-short">{{ day.short }}</span></span>
         <span class="day-count">{{ day.working }} on<template v-if="day.off"> · {{ day.off }} off</template></span>
+        <span v-if="day.shifts < SHIFTS.length" class="day-count">{{ day.shifts }} shift{{ day.shifts === 1 ? '' : 's' }}</span>
         <span v-if="day.iso === todayIso" class="day-today">Today</span>
       </button>
     </div>
@@ -53,17 +54,39 @@
 
     <!-- The selected day: each shift's hours and people -->
     <div class="cards">
-      <div v-for="shift in SHIFTS" :key="shift.code" class="cb-panel card">
+      <div v-for="shift in SHIFTS" :key="shift.code" :class="['cb-panel', 'card', { 'is-off': isOff(shift.code) }]">
         <div :class="['card-head', { 'is-on': isOnDuty(shift.code) }]">
           <div class="card-title-row">
             <span class="card-title">{{ shift.label }}</span>
             <span v-if="isOnDuty(shift.code)" class="duty">On duty now</span>
+            <span class="cb-spacer"></span>
+            <!-- Turn the shift off on this day (e.g. two 12-hour shifts at the weekend) -->
+            <label class="runs" :title="`${shift.label} shift on ${selectedDay.label}`">
+              <input
+                type="checkbox"
+                :checked="!isOff(shift.code)"
+                :disabled="!isOff(shift.code) && runningCount(selectedIso) <= 1"
+                :aria-label="`${shift.label} shift runs on ${selectedDay.label}`"
+                @change="setOff(shift.code, !$event.target.checked)"
+              />
+              <span>{{ isOff(shift.code) ? 'Off' : 'On' }}</span>
+            </label>
           </div>
-          <span class="tas">{{ dayHours(shift.code).tashkent }} <span class="tas-unit">TAS · {{ selectedDay.short }}</span></span>
-          <span class="et">{{ dayHours(shift.code).eastern }}</span>
+          <template v-if="!isOff(shift.code)">
+            <span class="tas">{{ dayHours(shift.code).tashkent }} <span class="tas-unit">TAS · {{ selectedDay.short }}</span></span>
+            <span class="et">{{ dayHours(shift.code).eastern }}</span>
+          </template>
+          <template v-else>
+            <span class="tas">No shift <span class="tas-unit">· {{ selectedDay.short }}</span></span>
+            <span class="et">Turned off on {{ selectedDay.label }}</span>
+          </template>
         </div>
 
-        <div class="card-body">
+        <div v-if="isOff(shift.code)" class="card-body">
+          <span class="cb-sub">There is no {{ shift.label }} shift on {{ selectedDay.label }}. Stretch the other shifts' hours to cover the day, or turn it back on.</span>
+          <button type="button" class="btn btn-secondary turn-on" @click="setOff(shift.code, false)">Turn on for {{ selectedDay.label }}</button>
+        </div>
+        <div v-else class="card-body">
           <div class="section">
             <div class="section-head">
               <span class="cb-label">Hours on {{ selectedDay.label }} (Tashkent)</span>
@@ -105,6 +128,7 @@
         </div>
       </div>
     </div>
+    <span v-if="gapNote" class="cb-sub small gap-note" role="status">{{ gapNote }}</span>
 
     <div class="cb-panel off-panel">
       <span class="cb-label">Day off on {{ selectedDay.label }} · {{ offOnDay.length }}</span>
@@ -120,7 +144,7 @@
     <div class="cb-panel week">
       <div class="week-head">
         <span class="cb-label">Week overview</span>
-        <span class="cb-sub small">One shift per person per day. "Off" is a day off.</span>
+        <span class="cb-sub small">One shift per person per day. "Off" is a day off. A shift turned off on a day can't be picked for it.</span>
       </div>
       <div class="week-scroll cb-scroll">
         <table class="week-table">
@@ -149,7 +173,7 @@
                   @change="setShift(member.id, day.iso, $event.target.value)"
                 >
                   <option value="">Off</option>
-                  <option v-for="shift in SHIFTS" :key="shift.code" :value="shift.code">{{ shift.label }}</option>
+                  <option v-for="shift in SHIFTS" :key="shift.code" :value="shift.code" :disabled="hoursDraft[shift.code][day.iso].off">{{ shift.label }}</option>
                 </select>
               </td>
               <td class="col-days">{{ workDays(member.id) }}</td>
@@ -198,7 +222,7 @@ const activeMembers = computed(() => staffProfiles.value
   .sort((a, b) => a.displayName.localeCompare(b.displayName)));
 // People: { staffId: { 1: 'MORNING', 2: '', ... 7 } } ('' = day off)
 const draft = reactive({});
-// Hours: { MORNING: { 1: { start, end }, ... 7 }, ... } as 'HH:MM'
+// Hours: { MORNING: { 1: { start, end, off }, ... 7 }, ... } as 'HH:MM'; off = no such shift that day
 const hoursDraft = reactive(Object.fromEntries(SHIFTS.map(s => [
   s.code,
   Object.fromEntries(WEEKDAYS.map(d => [d.iso, defaultRange(s)]))
@@ -217,7 +241,7 @@ const selectedDate = computed(() => addDays(today.value, (selectedIso.value - to
 let clockTimer = null;
 
 function defaultRange(shift) {
-  return { start: formatMinutes(shift.startMin), end: formatMinutes(shift.endMin) };
+  return { start: formatMinutes(shift.startMin), end: formatMinutes(shift.endMin), off: false };
 }
 
 // ---------------- saved state ----------------
@@ -230,10 +254,10 @@ function savedShift(memberId, iso) {
 function savedRange(code, iso) {
   const custom = customShiftHours.value[`${code}-${iso}`];
   if (!custom) return defaultRange(getShiftConfig(code));
-  return { start: formatMinutes(custom.startMin), end: formatMinutes(custom.endMin) };
+  return { start: formatMinutes(custom.startMin), end: formatMinutes(custom.endMin), off: !!custom.off };
 }
 
-const sameRange = (a, b) => a.start === b.start && a.end === b.end;
+const sameRange = (a, b) => a.start === b.start && a.end === b.end && !!a.off === !!b.off;
 
 function resetDraft() {
   Object.keys(draft).forEach(id => { delete draft[id]; });
@@ -279,6 +303,56 @@ function resetHours(shift) {
   hoursDraft[shift.code][selectedIso.value] = defaultRange(shift);
 }
 
+// ---------------- which shifts run on a day ----------------
+function isOff(code, iso = selectedIso.value) {
+  return !!hoursDraft[code][iso].off;
+}
+
+function runningCount(iso) {
+  return SHIFTS.filter(s => !isOff(s.code, iso)).length;
+}
+
+// Turn a shift off (or back on) on the selected day; its people get the day off
+function setOff(code, off) {
+  const iso = selectedIso.value;
+  if (off && runningCount(iso) <= 1) return;
+  hoursDraft[code][iso].off = off;
+  copyNote.value = '';
+  if (!off) return;
+  const moved = activeMembers.value.filter(m => draft[m.id]?.[iso] === code);
+  moved.forEach(m => { draft[m.id][iso] = ''; });
+  if (moved.length) {
+    copyNote.value = `${moved.map(m => m.displayName).join(', ')} ${moved.length === 1 ? 'was' : 'were'} on ${getShiftConfig(code).label} and now ${moved.length === 1 ? 'has' : 'have'} ${selectedDay.value.label} off. Add them to another shift if they work that day.`;
+  }
+}
+
+// Hours of the selected day nobody's shift covers, e.g. 'Not covered on Saturday: 15:00 – 19:00'
+const gapNote = computed(() => {
+  const iso = selectedIso.value;
+  const covered = new Array(1440).fill(false);
+  for (const s of SHIFTS) {
+    const hours = isOff(s.code, iso) ? null : draftMinutes(s.code, iso);
+    if (!hours) continue;
+    const length = (hours.endMin - hours.startMin + 1440) % 1440;
+    for (let i = 0; i < length; i += 1) covered[(hours.startMin + i) % 1440] = true;
+  }
+  // Start from the earliest shift start, so a night shift's morning hours count as its own day
+  const starts = SHIFTS.filter(s => !isOff(s.code, iso) && draftMinutes(s.code, iso)).map(s => draftMinutes(s.code, iso).startMin);
+  if (!starts.length) return '';
+  const from = Math.min(...starts);
+  const gaps = [];
+  for (let i = 0; i < 1440; i += 1) {
+    const minute = (from + i) % 1440;
+    if (covered[minute]) continue;
+    const last = gaps[gaps.length - 1];
+    if (last && last.end === i) last.end = i + 1;
+    else gaps.push({ start: i, end: i + 1 });
+  }
+  if (!gaps.length) return '';
+  const text = gaps.map(g => `${formatMinutes((from + g.start) % 1440)} – ${formatMinutes((from + g.end) % 1440)}`).join(', ');
+  return `No shift covers ${text} on ${selectedDay.value.label} (Tashkent).`;
+});
+
 const hoursDirty = computed(() => SHIFTS.some(s => WEEKDAYS.some(d =>
   !sameRange(hoursDraft[s.code][d.iso], savedRange(s.code, d.iso))
 )));
@@ -289,13 +363,19 @@ function hoursRows() {
   for (const s of SHIFTS) {
     for (const d of WEEKDAYS) {
       const range = hoursDraft[s.code][d.iso];
-      const startMin = parseMinutes(range.start);
-      const endMin = parseMinutes(range.end);
+      let startMin = parseMinutes(range.start);
+      let endMin = parseMinutes(range.end);
       const where = `${s.label} on ${d.label}`;
+      if (range.off) {
+        // Its hours are only kept for when it is turned back on
+        if (startMin === null || endMin === null || startMin === endMin) [startMin, endMin] = [s.startMin, s.endMin];
+        rows.push({ shift_code: s.code, weekday: d.iso, start_min: startMin, end_min: endMin, is_off: true });
+        continue;
+      }
       if (startMin === null || endMin === null) throw new Error(`Set both a start and an end time for ${where}.`);
       if (startMin === endMin) throw new Error(`${where} starts and ends at the same time.`);
       if (startMin === s.startMin && endMin === s.endMin) continue;
-      rows.push({ shift_code: s.code, weekday: d.iso, start_min: startMin, end_min: endMin });
+      rows.push({ shift_code: s.code, weekday: d.iso, start_min: startMin, end_min: endMin, is_off: false });
     }
   }
   return rows;
@@ -310,7 +390,7 @@ const isDirty = computed(() => peopleDirty.value || hoursDirty.value);
 
 // One shift per person per day: choosing another shift moves them, '' is a day off
 function setShift(memberId, iso, code) {
-  if (!memberId || !draft[memberId]) return;
+  if (!memberId || !draft[memberId] || (code && isOff(code, iso))) return;
   draft[memberId][iso] = code;
   copyNote.value = '';
 }
@@ -345,16 +425,17 @@ const offOnDay = computed(() => activeMembers.value.filter(m =>
 const dayTabs = computed(() => WEEKDAYS.map(d => ({
   ...d,
   working: activeMembers.value.filter(m => draft[m.id]?.[d.iso]).length,
-  off: activeMembers.value.filter(m => countsForDaysOff(m) && !draft[m.id]?.[d.iso]).length
+  off: activeMembers.value.filter(m => countsForDaysOff(m) && !draft[m.id]?.[d.iso]).length,
+  shifts: runningCount(d.iso)
 })));
 
 // Is this shift's run of the selected day on the clock right now?
 function isOnDuty(code) {
   const run = placeShift(now.value, code);
-  return now.value >= run.start && now.value < run.end && isoWeekday(run.day) === selectedIso.value;
+  return !!run && now.value >= run.start && now.value < run.end && isoWeekday(run.day) === selectedIso.value;
 }
 
-// Copy the selected day's people and hours onto other days
+// Copy the selected day's shifts (on / off), people and hours onto other days
 function copyDay(target) {
   if (!target) return;
   const from = selectedIso.value;
@@ -365,7 +446,7 @@ function copyDay(target) {
     SHIFTS.forEach(s => { hoursDraft[s.code][iso] = { ...hoursDraft[s.code][from] }; });
   });
   const names = days.map(iso => WEEKDAYS[iso - 1].short).join(', ');
-  copyNote.value = days.length ? `Copied ${selectedDay.value.label}'s people and hours to ${names}. Save to keep it.` : '';
+  copyNote.value = days.length ? `Copied ${selectedDay.value.label}'s shifts, people and hours to ${names}. Save to keep it.` : '';
 }
 
 // Rows for save_week_schedule: one per person per working day
@@ -383,6 +464,8 @@ async function save() {
     const hours = hoursDirty.value ? hoursRows() : null;
     if (hours) await saveShiftHours(hours);
     if (peopleDirty.value) await saveShiftSchedule(scheduleRows());
+    // Turning a shift off also takes its people off that day in the database
+    else if (hours) await loadTeamRoster();
     now.value = new Date();
     resetDraft();
     emit('saved');
@@ -441,13 +524,20 @@ onUnmounted(() => clearInterval(clockTimer));
   background: var(--color-neutral-200); color: var(--color-text); border-bottom: 1px solid var(--color-divider);
 }
 .card-head.is-on { background: var(--color-accent-900); color: var(--color-bg); }
-.card-title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-title-row { display: flex; align-items: center; gap: 8px; }
 .card-title { font-family: var(--font-heading); font-weight: 600; font-size: 24px; text-transform: uppercase; }
 .duty { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; background: var(--color-accent); color: var(--color-bg); padding: 3px 7px; }
 .tas { font-family: var(--font-heading); font-size: 18px; }
 .tas-unit { font-size: 13px; opacity: 0.7; }
 .et { font-size: 12px; opacity: 0.75; }
 .card-body { padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+.card.is-off .card-head { background: transparent; color: var(--color-neutral-700); border-bottom-style: dashed; }
+.card.is-off { border-style: dashed; box-shadow: none; }
+.runs { display: flex; align-items: center; gap: 6px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+.runs input { width: 16px; height: 16px; margin: 0; accent-color: var(--color-accent); cursor: pointer; }
+.runs input:disabled { cursor: not-allowed; }
+.turn-on { align-self: flex-start; }
+.gap-note { color: var(--color-signal); }
 
 .section { display: flex; flex-direction: column; gap: 8px; }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
