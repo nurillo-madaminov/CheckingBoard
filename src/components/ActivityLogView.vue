@@ -97,6 +97,7 @@ import { isCurrentUserManager, currentStaffUser, activeStaffProfiles } from '../
 import {
   SHIFTS,
   getShiftConfig,
+  sharesShift,
   currentWorkDay,
   addDays,
   formatWorkDayShort,
@@ -116,15 +117,14 @@ const isManager = computed(() => isCurrentUserManager());
 const staffProfiles = computed(() => activeStaffProfiles.value);
 const today = currentWorkDay();
 
-// Staff see their own records plus their shift-mates' on that shift (the database enforces this)
-const myShiftCode = computed(() => currentStaffUser.value?.shiftCode || '');
-const shiftMates = computed(() => (myShiftCode.value
-  ? staffProfiles.value.filter(p => p.shiftCode === myShiftCode.value)
-  : []));
+// Staff see their own records plus their shift-mates' on the shifts they share
+// (same shift on the same day of the week; the database enforces this)
+const myId = computed(() => currentStaffUser.value?.id || '');
+const shiftMates = computed(() => staffProfiles.value.filter(p => p.id === myId.value || sharesShift(p.id, myId.value)));
 const staffOptions = computed(() => (isManager.value ? staffProfiles.value : shiftMates.value));
 const scopeLabel = computed(() => {
   if (isManager.value) return 'All team actions';
-  if (shiftMates.value.length > 1) return `Your and your ${getShiftConfig(myShiftCode.value).label} shift-mates' actions`;
+  if (shiftMates.value.length > 1) return 'Your and your shift-mates\' actions';
   return 'Your own actions';
 });
 

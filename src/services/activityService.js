@@ -107,7 +107,6 @@ export function summarizeActivities(list, { fromDate, toDate, staffProfiles = []
       displayName: p.displayName,
       role: p.role,
       isActive: p.isActive !== false,
-      shiftCode: p.shiftCode || '',
       ...emptyCounts()
     };
   });
@@ -129,7 +128,6 @@ export function summarizeActivities(list, { fromDate, toDate, staffProfiles = []
         displayName: act.staff_name_snapshot || 'Unknown',
         role: 'former',
         isActive: false,
-        shiftCode: '',
         ...emptyCounts()
       };
     }

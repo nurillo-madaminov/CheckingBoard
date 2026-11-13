@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue';
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
-import { setCustomShiftHours } from '../config/shifts';
+import { setCustomShiftHours, setShiftSchedule } from '../config/shifts';
 import { canManage } from '../config/roles';
 
 /**
@@ -38,7 +38,6 @@ function mapProfile(row) {
     displayName: row.display_name,
     role: row.role,
     isActive: row.is_active,
-    shiftCode: row.shift_code || '',
     createdAt: row.created_at
   };
 }
@@ -144,8 +143,26 @@ export async function loadTeamRoster() {
     .select('*')
     .order('created_at', { ascending: true });
   if (error) throw friendlyError(error, 'Could not load team members');
+  await loadShiftSchedule();
   staffProfiles.value = (data || []).map(mapProfile);
   return staffProfiles.value;
+}
+
+/**
+ * The team's weekly shift schedule (who works which shift on which day). If it
+ * can't be read (for example the database script hasn't been re-run yet), nobody
+ * shows as scheduled.
+ */
+async function loadShiftSchedule() {
+  const { data, error } = await supabase
+    .from('shift_assignments')
+    .select('staff_id, weekday, shift_code');
+  if (error) {
+    console.warn('Could not load the shift schedule:', error.message);
+    setShiftSchedule([]);
+    return;
+  }
+  setShiftSchedule(data);
 }
 
 // Restoring a saved sign-in: retried until it is confirmed, rejected or the user signs out
@@ -262,11 +279,17 @@ export async function setStaffActive(staffId, isActive) {
 }
 
 /**
- * Manager saves the whole shift schedule: { MORNING: [ids], AFTERNOON: [ids], NIGHT: [ids] }
+ * Manager replaces the weekly schedule: [{ staff_id, weekday (1 = Monday), shift_code }].
+ * A day left out for someone is their day off.
  */
-export async function saveShiftSchedule(schedule) {
-  const { error } = await supabase.rpc('save_shift_schedule', { p_schedule: schedule });
-  if (error) throw friendlyError(error, 'Failed to save the shift schedule');
+export async function saveShiftSchedule(rows) {
+  const { error } = await supabase.rpc('save_week_schedule', { p_schedule: rows });
+  if (error) {
+    if (/save_week_schedule|schema cache/i.test(error.message || '')) {
+      throw new Error('The day-by-day schedule needs the updated database script. Run supabase_schema.sql in the Supabase SQL Editor, then try again.');
+    }
+    throw friendlyError(error, 'Failed to save the shift schedule');
+  }
   await loadTeamRoster();
 }
 
@@ -328,6 +351,7 @@ export async function logoutUser() {
   staffProfiles.value = [];
   currentTeam.value = null;
   setCustomShiftHours([]);
+  setShiftSchedule([]);
   if (supabase) {
     try {
       // This device only: the default ('global') would also sign the person out on

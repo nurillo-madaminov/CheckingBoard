@@ -41,6 +41,14 @@ npm run build      # production build in dist/
 
 Double-clicking `start.bat` also runs the dev server.
 
+## 🗓️ Shifts
+
+Managers plan the week on the **Shifts** page, day by day (Monday to Sunday): who works the
+Morning, Afternoon and Night shift on each day, and each shift's hours on that day. One shift per
+person per day; a day without a shift is that person's **day off** (no check-in, no reminders).
+"Copy day to…" repeats one day's people and hours on other days. After updating the app, re-run
+`supabase_schema.sql` once: it moves everyone's existing shift onto all seven days.
+
 ## 📱 Phone app & shift reminders
 
 CheckingBoard installs on phones as an app (Android: **Install app**; iPhone: Safari → Share →

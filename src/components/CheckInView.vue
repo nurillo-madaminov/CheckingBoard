@@ -21,6 +21,13 @@
         <span class="cb-bar shift-bar"><span :style="{ width: `${progressPct}%`, background: 'var(--color-accent)' }"></span></span>
         <span class="shift-sub">{{ dayLabel }} · late after {{ lateAfterClock }}</span>
       </template>
+      <div v-else-if="scheduled" class="no-shift">
+        <span class="shift-name">Day off</span>
+        <span class="shift-sub">
+          <template v-if="nextRun">Next: {{ getShiftConfig(nextRun.code).label }} shift, {{ formatWorkDayShort(nextRun.day) }} · {{ shiftHours(nextRun.code, nextRun.day).tashkent }}</template>
+          <template v-else>No shift today.</template>
+        </span>
+      </div>
       <div v-else class="no-shift">
         <span class="shift-name">No shift</span>
         <span class="shift-sub">You're not on a shift yet. Ask your manager to add you to one.</span>
@@ -96,7 +103,7 @@
               <span v-if="d.late" class="late-tag">Late {{ formatMinutesSpan(d.lateMin) }}</span>
               <span v-else class="ok-tag">On time</span>
             </template>
-            <span v-else class="day-none">{{ d.future ? '—' : 'No check-in' }}</span>
+            <span v-else class="day-none">{{ d.off ? 'Day off' : d.future ? d.planned : 'No check-in' }}</span>
           </div>
         </div>
       </div>
@@ -109,9 +116,9 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import {
   readLocation, checkIn, checkOut, fetchAttendanceRules, fetchAttendance, formatMinutesSpan
 } from '../services/attendanceService';
-import { currentStaffUser, staffProfiles, loadTeamRoster, loadShiftHours } from '../services/authService';
+import { currentStaffUser, loadTeamRoster, loadShiftHours } from '../services/authService';
 import {
-  placeShift, shiftHours, getShiftConfig, addDays, currentWorkDay, isoWeekday, clockTashkent, clockEastern,
+  placeStaffShift, nextStaffShift, hasSchedule, shiftOn, shiftHours, getShiftConfig, addDays, currentWorkDay, isoWeekday, clockTashkent, clockEastern,
   formatTashkentClock, formatWorkDayShort
 } from '../config/shifts';
 
@@ -133,14 +140,13 @@ const busy = ref(false);
 const result = ref(null); // { kind: 'ok' | 'warn' | 'error' | 'working', title, text }
 let timer = null;
 
-// My shift as the roster says now (the manager may have changed it since sign-in)
-const myShiftCode = computed(() => {
-  const me = staffProfiles.value.find(p => p.id === currentStaffUser.value?.id);
-  return (me || currentStaffUser.value)?.shiftCode || '';
-});
+const myId = computed(() => currentStaffUser.value?.id || '');
+// Am I on the weekly schedule at all?
+const scheduled = computed(() => hasSchedule(myId.value));
 
-// The run of my shift that "now" belongs to (same rule as the database)
-const run = computed(() => (myShiftCode.value ? placeShift(now.value, myShiftCode.value) : null));
+// The run of my schedule that "now" belongs to (same rule as the database); null on a day off
+const run = computed(() => placeStaffShift(now.value, myId.value));
+const nextRun = computed(() => (run.value ? null : nextStaffShift(now.value, myId.value)));
 const shiftLabel = computed(() => (run.value ? getShiftConfig(run.value.code).label : ''));
 const hoursLabel = computed(() => (run.value ? shiftHours(run.value.code, run.value.day).tashkent : ''));
 const dayLabel = computed(() => (run.value ? formatWorkDayShort(run.value.day) : ''));
@@ -198,7 +204,7 @@ const actionSub = computed(() => {
   const r = openRecord.value || runRecord.value;
   if (mode.value === 'out') return `In since ${formatTashkentClock(r.check_in_at)}${r.is_late ? ` · late ${formatMinutesSpan(r.late_min)}` : ''}`;
   if (mode.value === 'done') return `${formatTashkentClock(r.check_in_at)} – ${formatTashkentClock(r.check_out_at)}`;
-  if (!run.value) return 'No shift assigned';
+  if (!run.value) return scheduled.value ? 'Day off' : 'No shift assigned';
   if (!rules.value) return 'Check-in is not available right now';
   if (!rules.value.officeSet) return 'Office not set';
   if (now.value < opensAt.value) return `Opens at ${clockTashkent(opensAt.value)}`;
@@ -262,6 +268,9 @@ const weekDays = computed(() => {
       records: dayRecords,
       isToday: date === today,
       future: date > today,
+      // By the schedule as it is now (shown for days without a check-in, this week onwards)
+      off: weekOffset.value >= 0 && scheduled.value && !shiftOn(myId.value, date),
+      planned: shiftOn(myId.value, date) ? `${getShiftConfig(shiftOn(myId.value, date)).label} · ${shiftHours(shiftOn(myId.value, date), date).tashkent}` : '—',
       late: dayRecords.some(r => r.is_late),
       lateMin: dayRecords.reduce((m, r) => m + (r.is_late ? r.late_min : 0), 0)
     };

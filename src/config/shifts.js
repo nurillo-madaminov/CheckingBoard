@@ -7,6 +7,8 @@ import { ref } from 'vue';
  * activity with its shift_code and shift_date (the work day the shift started on).
  * Hours are minutes after Tashkent midnight; a manager can change them per
  * shift and per weekday (public.shift_hours), anything not set uses the defaults.
+ * People are put on a shift day by day (public.shift_assignments); a weekday
+ * without a shift is that person's day off.
  */
 export const SHIFT_TIMEZONE = 'Asia/Tashkent';
 export const REPORT_TIMEZONE = 'America/New_York';
@@ -60,6 +62,18 @@ export function setCustomShiftHours(rows) {
     `${r.shift_code}-${r.weekday}`,
     { startMin: r.start_min, endMin: r.end_min }
   ]));
+}
+
+// The team's weekly schedule: { staffId: { 1: 'MORNING', ... 7: 'NIGHT' } }, weekday
+// 1 = Monday ... 7 = Sunday (the day the shift starts); a missing day is a day off
+export const shiftSchedule = ref({});
+
+export function setShiftSchedule(rows) {
+  const schedule = {};
+  (rows || []).forEach(r => {
+    (schedule[r.staff_id] ||= {})[r.weekday] = r.shift_code;
+  });
+  shiftSchedule.value = schedule;
 }
 
 const TASHKENT_UTC_OFFSET_HOURS = 5;
@@ -136,6 +150,17 @@ function shiftRun(code, day, hours = hoursOn(code, day)) {
   };
 }
 
+// How far a moment is from a run, in ms: 0 inside [start, end); the end itself
+// already belongs to the next shift
+function runDistance(run, now) {
+  return now >= run.end ? now - run.end + 1 : Math.max(run.start - now, 0);
+}
+
+// The run that covers a moment (the earlier-starting one in an overlap), else the nearest
+function nearestRun(runs, now) {
+  return [...runs].sort((a, b) => (runDistance(a, now) - runDistance(b, now)) || (a.start - b.start))[0] || null;
+}
+
 /**
  * The shift run a moment belongs to, by the same rule as public.cb_shift_of:
  * the run (started yesterday or today) that covers it, the earlier-starting one
@@ -146,9 +171,85 @@ export function placeShift(now = new Date(), assignedCode = '') {
   const runs = SHIFTS
     .filter(s => !assignedCode || s.code === assignedCode)
     .flatMap(s => [shiftRun(s.code, addDays(today, -1)), shiftRun(s.code, today)]);
-  // 0 inside [start, end); the end itself already belongs to the next shift
-  const distance = r => (now >= r.end ? now - r.end + 1 : Math.max(r.start - now, 0));
-  return runs.sort((a, b) => (distance(a) - distance(b)) || (a.start - b.start))[0];
+  return nearestRun(runs, now);
+}
+
+// ---------------- the weekly schedule (who works which shift on which day) ----------------
+// Is this person on the schedule at all?
+export function hasSchedule(staffId) {
+  return Object.keys(shiftSchedule.value[staffId] || {}).length > 0;
+}
+
+// The shift a person works on a work day ('YYYY-MM-DD'); '' on their day off
+export function shiftOn(staffId, workDay) {
+  return shiftSchedule.value[staffId]?.[isoWeekday(workDay)] || '';
+}
+
+const STAFF_RUN_REACH_MS = 12 * 3600e3;
+const CHECK_IN_OPENS_MS = 2 * 3600e3;
+
+/**
+ * The run of a person's own schedule a moment belongs to, by the same rule as
+ * public.cb_staff_shift_of: of the runs they are scheduled for (started yesterday
+ * or today, or tomorrow's once check-in for it is open), the one that covers it,
+ * else the nearest one less than 12 hours away. null on a day off.
+ */
+export function placeStaffShift(now = new Date(), staffId = '') {
+  const today = tashkentDate(now);
+  const runs = [-1, 0, 1].flatMap(offset => {
+    const day = addDays(today, offset);
+    const code = shiftOn(staffId, day);
+    if (!code) return [];
+    const run = shiftRun(code, day);
+    return offset === 1 && run.start - now > CHECK_IN_OPENS_MS ? [] : [run];
+  });
+  const run = nearestRun(runs, now);
+  return run && runDistance(run, now) < STAFF_RUN_REACH_MS ? run : null;
+}
+
+// A person's next run that has not started yet (within a week); null with no schedule
+export function nextStaffShift(now = new Date(), staffId = '') {
+  const today = tashkentDate(now);
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const day = addDays(today, offset);
+    const code = shiftOn(staffId, day);
+    if (!code) continue;
+    const run = shiftRun(code, day);
+    if (run.start > now) return run;
+  }
+  return null;
+}
+
+// Do two people work the same shift on at least one day of the week?
+export function sharesShift(staffIdA, staffIdB) {
+  const a = shiftSchedule.value[staffIdA] || {};
+  const b = shiftSchedule.value[staffIdB] || {};
+  return WEEKDAYS.some(d => a[d.iso] && a[d.iso] === b[d.iso]);
+}
+
+// 'Mon–Fri', 'Mon, Wed, Sat–Sun' for a list of ISO weekdays
+export function formatWeekdays(isoDays) {
+  const days = [...isoDays].sort((x, y) => x - y);
+  const parts = [];
+  for (let i = 0; i < days.length; i += 1) {
+    let j = i;
+    while (days[j + 1] === days[j] + 1) j += 1;
+    const from = WEEKDAYS[days[i] - 1].short;
+    const to = WEEKDAYS[days[j] - 1].short;
+    parts.push(j === i ? from : j === i + 1 ? `${from}, ${to}` : `${from}–${to}`);
+    i = j;
+  }
+  return parts.join(', ');
+}
+
+// A person's week in a line: 'Morning', 'Morning Mon–Fri', 'Morning Mon–Wed · Night Fri–Sat'; '' with no schedule
+export function scheduleSummary(staffId) {
+  const week = shiftSchedule.value[staffId] || {};
+  return SHIFTS
+    .map(s => ({ shift: s, days: WEEKDAYS.filter(d => week[d.iso] === s.code).map(d => d.iso) }))
+    .filter(g => g.days.length)
+    .map(g => (g.days.length === 7 ? g.shift.label : `${g.shift.label} ${formatWeekdays(g.days)}`))
+    .join(' · ');
 }
 
 // The work day happening right now (a shift past midnight still belongs to the day it began)

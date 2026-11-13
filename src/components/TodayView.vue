@@ -45,7 +45,21 @@
             <span v-if="p.tag" :class="['tag-pill', { 'is-late': p.lateTag }]">{{ p.tag }}</span>
           </div>
         </div>
-        <div v-if="!g.people.length" class="empty">Nobody on this shift.</div>
+        <div v-if="!g.people.length" class="empty">Nobody on this shift {{ g.dayWord }}.</div>
+      </div>
+    </section>
+
+    <!-- People with a schedule whose day off is today -->
+    <section v-if="offToday.length" class="group">
+      <div class="group-head">
+        <span class="group-name">Day off</span>
+        <span class="cb-spacer"></span>
+        <span class="group-hours">{{ offToday.length }}</span>
+      </div>
+      <div class="cb-panel off-list">
+        <span v-for="p in offToday" :key="p.id" class="off-chip">
+          <span class="cb-avatar off-avatar">{{ initials(p.displayName) }}</span>{{ p.displayName }}
+        </span>
       </div>
     </section>
   </div>
@@ -56,7 +70,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { fetchAttendance, fetchAttendanceRules, formatMinutesSpan } from '../services/attendanceService';
 import { activeStaffProfiles, loadTeamRoster, loadShiftHours } from '../services/authService';
 import {
-  SHIFTS, placeShift, shiftHours, currentWorkDay, addDays, clockTashkent, formatWorkDay, formatTashkentClock
+  SHIFTS, placeShift, shiftHours, shiftOn, hasSchedule, currentWorkDay, addDays, clockTashkent, formatWorkDay, formatTashkentClock
 } from '../config/shifts';
 import { checksIn, roleLabel } from '../config/roles';
 import { initials } from '../utils/format';
@@ -75,8 +89,9 @@ let timer = null;
 const dayLabel = computed(() => formatWorkDay(currentWorkDay(now.value)));
 const clockTas = computed(() => clockTashkent(now.value));
 
-// Everyone who checks in, by shift (managers don't check in)
-const roster = computed(() => activeStaffProfiles.value.filter(p => p.shiftCode && checksIn(p.role)));
+// Everyone who checks in and is on the weekly schedule (managers don't check in)
+const roster = computed(() => activeStaffProfiles.value.filter(p => hasSchedule(p.id) && checksIn(p.role)));
+
 
 function personState(person, run, phase) {
   const rec = records.value.find(r => r.staff_id === person.id && r.shift_date === run.day && r.shift_code === run.code);
@@ -102,7 +117,8 @@ const groups = computed(() => SHIFTS.map(s => {
   const minsTo = Math.max(0, Math.round((run.start - now.value) / 60000));
   const minsLeft = Math.max(0, Math.round((run.end - now.value) / 60000));
   const people = roster.value
-    .filter(p => p.shiftCode === s.code)
+    // The people scheduled on this shift on the day this run starts
+    .filter(p => shiftOn(p.id, run.day) === s.code)
     .map(p => ({ id: p.id, name: p.displayName, role: roleLabel(p.role), ...personState(p, run, phase) }));
   return {
     code: s.code,
@@ -111,9 +127,16 @@ const groups = computed(() => SHIFTS.map(s => {
     phase,
     phaseLabel: phase === 'on' ? `On now · ${formatMinutesSpan(minsLeft)} left` : phase === 'soon' ? `Starts in ${formatMinutesSpan(minsTo)}` : 'Ended',
     hours: shiftHours(s.code, run.day).tashkent,
+    dayWord: run.day === currentWorkDay(now.value) ? 'today' : `on ${formatWorkDay(run.day).split(',')[0]}`,
     people
   };
 }));
+
+// Scheduled people who are in none of the runs shown above: their day off
+const offToday = computed(() => {
+  const listed = new Set(groups.value.flatMap(g => g.people.map(p => p.id)));
+  return roster.value.filter(p => !listed.has(p.id));
+});
 
 // Counts for the shifts on duty right now
 const totals = computed(() => {
@@ -188,4 +211,10 @@ onUnmounted(() => clearInterval(timer));
 .tag-pill { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding: 1px 6px; background: var(--color-accent-100); color: var(--color-accent-800); white-space: nowrap; }
 .tag-pill.is-late { background: var(--color-signal); color: var(--color-bg); }
 .empty { padding: 16px 14px; font-size: 13px; color: var(--color-neutral-700); }
+.off-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+.off-chip {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 10px 3px 3px;
+  border: 1px solid var(--color-divider); background: var(--color-bg); color: var(--color-neutral-800);
+}
+.off-avatar { width: 22px; height: 22px; font-size: 9px; }
 </style>

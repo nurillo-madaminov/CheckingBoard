@@ -76,7 +76,7 @@
             <span class="cb-avatar avatar">{{ initials(p.displayName) }}</span>
             <span class="cb-ellipsis strong">{{ p.displayName }}</span>
           </div>
-          <div class="cb-muted">{{ p.shiftCode ? getShiftConfig(p.shiftCode).label : '—' }}</div>
+          <div class="cb-muted">{{ scheduleSummary(p.staffId) || '—' }}</div>
           <div v-for="act in ACTION_TYPES" :key="act.code" class="right num">{{ p[act.code] || 0 }}</div>
           <div class="pad total-cell">
             <span class="cb-num staff-total">{{ p.total }}</span>
@@ -96,7 +96,7 @@ import { ACTION_TYPES, fetchActivities, summarizeActivities } from '../services/
 import { staffProfiles, loadTeamRoster } from '../services/authService';
 import {
   SHIFTS,
-  getShiftConfig,
+  scheduleSummary,
   shiftHours,
   currentWorkDay,
   addDays,

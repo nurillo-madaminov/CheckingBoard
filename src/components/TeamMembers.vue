@@ -12,7 +12,7 @@
           <span class="cb-avatar avatar">{{ initials(profile.displayName) }}</span>
           <div class="who-text">
             <span class="who-name cb-ellipsis">{{ profile.displayName }}</span>
-            <span class="who-meta cb-ellipsis">@{{ profile.username || profile.email }} · {{ shiftName(profile.shiftCode) }}</span>
+            <span class="who-meta cb-ellipsis">@{{ profile.username || profile.email }} · {{ scheduleSummary(profile.id) || 'No shift' }}</span>
           </div>
         </div>
         <span :class="['role', `is-${profile.role}`]">{{ roleLabel(profile.role) }}</span>
@@ -112,7 +112,7 @@ import {
   resetStaffPassword,
   setStaffActive
 } from '../services/authService';
-import { getShiftConfig } from '../config/shifts';
+import { scheduleSummary } from '../config/shifts';
 import { ROLES, roleLabel } from '../config/roles';
 import { initials } from '../utils/format';
 
@@ -127,10 +127,6 @@ const resetPasswordValue = ref('');
 const confirmTarget = ref(null);
 
 const newStaffForm = reactive({ displayName: '', username: '', password: '', role: 'staff' });
-
-function shiftName(code) {
-  return code ? getShiftConfig(code).label : 'No shift';
-}
 
 function showFeedback(message, type = 'success') {
   feedbackMessage.value = message;
