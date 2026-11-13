@@ -1,8 +1,8 @@
 <template>
-  <div class="cb-page cb-scroll profile">
-    <div class="cb-page-head">
+  <div :class="embedded ? 'cb-embedded profile' : 'cb-page cb-scroll profile'">
+    <div v-if="!embedded" class="cb-page-head">
       <div class="title-block">
-        <h2 class="cb-title">Profile settings</h2>
+        <h2 class="cb-title">My account</h2>
         <span class="cb-sub">Your own account. Changes apply on every device.</span>
       </div>
     </div>
@@ -84,9 +84,6 @@
         </div>
       </form>
 
-      <!-- Phone alerts on this device (hidden when push isn't configured) -->
-      <PushAlertsToggle />
-
       <div class="signout">
         <button type="button" class="btn btn-secondary" @click="$emit('logout')">Sign out of this device</button>
       </div>
@@ -96,12 +93,15 @@
 
 <script setup>
 import { reactive, ref, computed, watch } from 'vue';
-import PushAlertsToggle from './PushAlertsToggle.vue';
 import {
   currentStaffUser, currentTeam, updateMyDisplayName, updateMyUsername, changeMyPassword
 } from '../services/authService';
 import { initials } from '../utils/format';
 
+defineProps({
+  // Shown inside Settings (desktop) or the phone's account page
+  embedded: { type: Boolean, default: false }
+});
 const emit = defineEmits(['logout', 'saved']);
 
 const user = computed(() => currentStaffUser.value);

@@ -22,7 +22,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <!-- NOT SIGNED IN: SIGN IN / CREATE A TEAM -->
   <LoginView v-else-if="!currentUser" />
 
-  <!-- SIGNED IN ON A PHONE: only the phone features, tabs at the bottom -->
+  <!-- SIGNED IN ON A PHONE: only check-in, shifts and alerts; its own flow, tabs at the bottom -->
   <div v-else-if="isPhone" class="phone">
     <header class="phone-top">
       <span class="phone-mark">CB</span>
@@ -31,29 +31,26 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         <span class="phone-user cb-ellipsis">{{ currentUser.displayName }} · {{ roleLabel(currentUser.role) }}</span>
       </div>
       <span :class="['live-dot', { 'is-live': isLive }]" :title="isLive ? 'Live' : 'Connecting…'"></span>
-      <button class="phone-signout" title="Sign out" aria-label="Sign out" @click="handleLogout">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></svg>
+      <!-- Account (name, password, sign out) sits behind the avatar -->
+      <button
+        :class="['phone-avatar', { 'is-on': phoneTab === 'account' }]"
+        :aria-label="`Account: ${currentUser.displayName}. Name, password, sign out`"
+        @click="phoneTab = 'account'"
+      >
+        {{ initials(currentUser.displayName) }}
       </button>
     </header>
 
     <main class="phone-main">
-      <TodayView v-if="phoneTab === 'today' && isManager" :refreshKey="attendanceVersion" />
-      <div v-else-if="phoneTab === 'checkin'" class="cb-page cb-scroll"><CheckInView :refreshKey="attendanceVersion" /></div>
-      <div v-else-if="phoneTab === 'team' && !isManager" class="cb-page cb-scroll"><TeamView /></div>
-      <TeamManagementView
-        v-else-if="phoneTab === 'team' && isManager"
-        :refreshKey="attendanceVersion"
-        @saved="showToast($event)"
-        @error="showErrorToast($event.title, $event.message)"
-      />
-      <PhoneMoreView
-        v-else-if="phoneTab === 'more' && isManager"
-        :activeDrivers="drivers"
-        :refreshKey="activityVersion"
-        @toast="showToast($event)"
-        @error="showErrorToast($event.title, $event.message)"
-      />
-      <ProfileView v-else-if="phoneTab === 'profile'" @logout="handleLogout" />
+      <div v-if="phoneTab === 'checkin'" class="cb-page cb-scroll"><CheckInView :refreshKey="attendanceVersion" @open-shifts="phoneTab = 'shifts'" /></div>
+      <TodayView v-else-if="phoneTab === 'today' && isManager" :refreshKey="attendanceVersion" />
+      <div v-else-if="phoneTab === 'shifts'" class="cb-page cb-scroll"><MyShiftsView :refreshKey="attendanceVersion" /></div>
+      <div v-else-if="phoneTab === 'alerts'" class="cb-page cb-scroll"><AlertsView @unread="unreadCount = $event" @open-checkin="openView('checkin')" /></div>
+      <div v-else-if="phoneTab === 'account'" class="cb-page cb-scroll phone-account">
+        <button type="button" class="cb-link back" @click="resetPhoneTab">← Back</button>
+        <h2 class="cb-title">Account</h2>
+        <ProfileView embedded @logout="handleLogout" />
+      </div>
     </main>
 
     <nav class="phone-tabs" aria-label="Sections">
@@ -65,9 +62,10 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         @click="phoneTab = t.id"
       >
         <span class="phone-tab-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" v-html="t.icon"></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="t.icon"></svg>
+          <span v-if="t.id === 'alerts' && unreadCount" class="phone-badge">{{ unreadCount }}</span>
         </span>
-        <span class="phone-tab-label">{{ t.label }}</span>
+        <span class="phone-tab-label">{{ t.label }}<template v-if="t.id === 'alerts' && unreadCount"><span class="sr-only"> · {{ unreadCount }} new</span></template></span>
       </button>
     </nav>
   </div>
@@ -76,7 +74,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
   <div v-else class="shell">
     <SideNav
       :collapsed="railCollapsed"
-      :activeView="activeView"
+      :activeView="navSection"
       :currentUser="currentUser"
       :teamName="currentTeam?.name || ''"
       :isLive="isLive"
@@ -90,73 +88,104 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
     />
 
     <main class="main">
-      <!-- 1. BOARD -->
-      <CheckingBoardTable
-        v-if="activeView === 'fleet'"
-        v-model:searchQuery="searchQuery"
+      <!-- 1. BOARD: live checking (home). 2. FLEET (managers): drivers and companies, bulk changes.
+           Both stay alive (open companies, filters, scroll) while a driver page is open. -->
+      <KeepAlive :include="['CheckingBoardTable', 'FleetView']">
+        <CheckingBoardTable
+          v-if="activeView === 'board'"
+          v-model:searchQuery="searchQuery"
+          :companies="companies"
+          :drivers="drivers"
+          :tabs="tabs"
+          :activeTabId="activeTabId"
+          :tabCounts="tabCounts"
+          :selectedDriverId="selectedDriverId"
+          :canManageFleet="isManager"
+          :todayActivities="todayActivities"
+          :keyboardEnabled="!anyDialogOpen"
+          @select-driver="selectedDriverId = $event"
+          @open-driver="openDriver($event, 'board')"
+          @select-tab="activeTabId = $event"
+          @reorder-tabs="handleReorderTabs"
+          @reorder-driver="handleReorderDriver"
+          @reorder-company="handleReorderCompany"
+          @add-company="openAddCompanyModal"
+          @add-driver="openAddDriverForCompany"
+          @add-driver-new="openAddDriver('')"
+          @edit-driver="openEditDriverModal"
+          @delete-driver="deleteDriver"
+          @update-driver="updateDriver"
+          @edit-company="openEditCompanyModal"
+          @delete-company="deleteCompany"
+          @reset-data="handleResetData"
+        />
+
+        <FleetView
+          v-else-if="activeView === 'fleet' && isManager"
+          :companies="companies"
+          :drivers="drivers"
+          :canManageFleet="isManager"
+          :initialCompanyId="fleetCompanyId"
+          @open-driver="openDriver($event, 'fleet')"
+          @add-driver="openAddDriver($event)"
+          @add-company="openAddCompanyModal"
+          @edit-company="openEditCompanyModal"
+          @delete-company="deleteCompany"
+          @edit-driver="openEditDriverModal"
+          @delete-driver="deleteDriver"
+          @update-driver="updateDriver"
+          @bulk-update="bulkUpdateDrivers"
+          @bulk-delete="bulkDeleteDrivers"
+        />
+      </KeepAlive>
+
+      <!-- Driver page: status, notes and history of one driver -->
+      <DriverDetailView
+        v-if="activeView === 'driver'"
+        :driver="openedDriver"
         :companies="companies"
         :drivers="drivers"
-        :tabs="tabs"
-        :activeTabId="activeTabId"
-        :tabCounts="tabCounts"
-        :selectedDriverId="selectedDriverId"
         :canManageFleet="isManager"
-        :todayActivities="todayActivities"
+        :from="driverFrom"
+        :refreshKey="activityVersion"
         :keyboardEnabled="!anyDialogOpen"
-        @select-driver="selectedDriverId = $event"
-        @select-tab="activeTabId = $event"
-        @reorder-tabs="handleReorderTabs"
-        @reorder-driver="handleReorderDriver"
-        @reorder-company="handleReorderCompany"
-        @add-company="openAddCompanyModal"
-        @add-driver="openAddDriverForCompany"
+        @back="closeDriver"
+        @open-driver="openDriver($event, driverFrom)"
+        @open-company="openFleetCompany"
+        @open-activity="openActivity"
+        @update-driver="updateDriver"
         @edit-driver="openEditDriverModal"
         @delete-driver="deleteDriver"
-        @update-driver="updateDriver"
-        @edit-company="openEditCompanyModal"
-        @delete-company="deleteCompany"
-        @reset-data="handleResetData"
       />
 
-      <!-- 2. ACTION LOGS (staff: own records, manager: whole team) -->
-      <ActivityLogView
-        v-else-if="activeView === 'activity_log'"
-        :activeDrivers="drivers"
-        :refreshKey="activityVersion"
-      />
-
-      <!-- 3. SHIFT CONTROL PANEL (manager) -->
-      <ShiftControlView
-        v-else-if="activeView === 'shifts' && isManager"
-        @saved="showToast({ title: 'Shift schedule saved', message: 'New actions use the updated shifts' })"
-        @office-saved="showToast($event)"
-        @office-error="showErrorToast($event.title, $event.message)"
-      />
-
-      <!-- 4. STATISTICS (manager) -->
-      <DailyStatisticsView
-        v-else-if="activeView === 'statistics' && isManager"
-        :refreshKey="activityVersion"
-      />
-
-      <!-- 5. TEAM (manager): members and their accounts, attendance -->
-      <TeamManagementView
-        v-else-if="activeView === 'team' && isManager"
+      <!-- 3. STAFF (managers): today, schedule, attendance, members -->
+      <StaffView
+        v-else-if="activeView === 'staff' && isManager"
         :refreshKey="attendanceVersion"
         @saved="showToast($event)"
         @error="showErrorToast($event.title, $event.message)"
       />
 
-      <!-- 6. EXTENSIONS (everyone downloads, managers publish) -->
-      <ExtensionsView
-        v-else-if="activeView === 'extensions'"
+      <!-- 4. REPORTS: activity (staff: own and shift-mates', managers: the team) and statistics -->
+      <ReportsView
+        v-else-if="activeView === 'reports'"
+        :activeDrivers="drivers"
+        :refreshKey="activityVersion"
         :isManager="isManager"
-        :teamId="currentUser?.teamId || ''"
-        @published="showToast({ title: 'Extension published', message: $event })"
+        :preset="reportsPreset"
       />
 
-      <!-- 7. PROFILE SETTINGS (everyone): own name, username, password -->
-      <ProfileView v-else-if="activeView === 'profile'" @logout="handleLogout" />
+      <!-- 5. SETTINGS: account, attendance rules, office location, extensions -->
+      <SettingsView
+        v-else-if="activeView === 'settings'"
+        :key="settingsKey"
+        :isManager="isManager"
+        :teamId="currentUser?.teamId || ''"
+        :section="settingsSection"
+        @logout="handleLogout"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
+      />
     </main>
 
     <!-- Add / edit company -->
@@ -221,17 +250,18 @@ import CheckingBoardTable from './components/CheckingBoardTable.vue';
 import AddCompanyModal from './components/AddCompanyModal.vue';
 import AddDriverModal from './components/AddDriverModal.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import ActivityLogView from './components/ActivityLogView.vue';
-import ShiftControlView from './components/ShiftControlView.vue';
-import DailyStatisticsView from './components/DailyStatisticsView.vue';
-import ExtensionsView from './components/ExtensionsView.vue';
 import LoginView from './components/LoginView.vue';
+import DriverDetailView from './components/DriverDetailView.vue';
+import FleetView from './components/FleetView.vue';
+import StaffView from './components/StaffView.vue';
+import ReportsView from './components/ReportsView.vue';
+import SettingsView from './components/SettingsView.vue';
 import CheckInView from './components/CheckInView.vue';
-import TeamView from './components/TeamView.vue';
-import TeamManagementView from './components/TeamManagementView.vue';
+import MyShiftsView from './components/MyShiftsView.vue';
+import AlertsView from './components/AlertsView.vue';
 import ProfileView from './components/ProfileView.vue';
 import TodayView from './components/TodayView.vue';
-import PhoneMoreView from './components/PhoneMoreView.vue';
+import { fetchNotifications } from './services/notificationService';
 import { syncPushSubscription, forgetThisDevice } from './services/pushService';
 
 import { BOTTOM_TABS, getStatusConfig, getStatusTab } from './config/statusConfig';
@@ -248,7 +278,7 @@ import {
 } from './services/authService';
 import { fetchActivities } from './services/activityService';
 import * as db from './services/supabaseService';
-import { driverLabel as driverLabelOf } from './utils/format';
+import { driverLabel as driverLabelOf, initials } from './utils/format';
 
 // ---------------------------------------------------------------------------
 // State: everything comes from the shared team database
@@ -263,7 +293,18 @@ const drivers = ref([]);
 const activityVersion = ref(0); // bumped when new actions arrive so open log views reload
 const attendanceVersion = ref(0); // bumped when a check-in / check-out arrives live
 const activeTabId = ref('CHECKING_BOARD');
-const activeView = ref('fleet'); // 'fleet' | 'activity_log' | 'shifts' | 'statistics' | 'team' | 'extensions' | 'profile'
+// 'board' | 'driver' | 'fleet' | 'staff' | 'reports' | 'settings'
+const activeView = ref('board');
+// The driver page: which driver, and the page it was opened from ('board' | 'fleet')
+const openedDriverId = ref('');
+const driverFrom = ref('board');
+const openedDriver = computed(() => drivers.value.find(d => d.id === openedDriverId.value) || null);
+// The sidebar shows the section a driver page belongs to
+const navSection = computed(() => (activeView.value === 'driver' ? driverFrom.value : activeView.value));
+const fleetCompanyId = ref('');
+const reportsPreset = ref(null);
+const settingsSection = ref('account');
+const settingsKey = ref(0);
 const searchQuery = ref('');
 const selectedDriverId = ref('');
 const isLive = ref(false);
@@ -318,29 +359,22 @@ phoneQuery.addEventListener('change', onPhoneChange);
 
 const ICONS = {
   checkin: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" />',
-  today: '<rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" /><path d="m9 16 2 2 4-4" />',
-  more: '<circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" />',
-  profile: '<circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />',
-  team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />',
+  today: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="m16 11 2 2 4-4" />',
+  shifts: '<rect width="18" height="18" x="3" y="4" rx="1" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" />',
+  alerts: '<path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />'
 };
 
-// Staff: Check in, Team, Profile. Supervisors: Today, Check in, Team, More, Profile.
-// Managers (no check-in): Today, Team, More, Profile.
+// The phone only does what staff need away from the PC:
+// Staff: Check in, My shifts, Alerts. Supervisors: Check in, Today, My shifts, Alerts.
+// Managers (no check-in): Today, Alerts. Account is behind the avatar.
 const phoneTabs = computed(() => {
   const role = currentUser.value?.role;
-  const tabs = isManager.value
-    ? [
-        { id: 'today', label: 'Today' },
-        ...(checksIn(role) ? [{ id: 'checkin', label: 'Check in' }] : []),
-        { id: 'team', label: 'Team' },
-        { id: 'more', label: 'More' },
-        { id: 'profile', label: 'Profile' }
-      ]
-    : [
-        { id: 'checkin', label: 'Check in' },
-        { id: 'team', label: 'Team' },
-        { id: 'profile', label: 'Profile' }
-      ];
+  const tabs = [
+    ...(checksIn(role) ? [{ id: 'checkin', label: 'Check in' }] : []),
+    ...(isManager.value ? [{ id: 'today', label: 'Today' }] : []),
+    ...(checksIn(role) ? [{ id: 'shifts', label: 'My shifts' }] : []),
+    { id: 'alerts', label: 'Alerts' }
+  ];
   return tabs.map(t => ({ ...t, icon: ICONS[t.id] }));
 });
 const phoneTab = ref('checkin');
@@ -350,8 +384,19 @@ function resetPhoneTab() {
 }
 // A role change (e.g. staff -> supervisor) can remove the open tab
 watch(phoneTabs, (tabs) => {
-  if (!tabs.some(t => t.id === phoneTab.value)) resetPhoneTab();
+  if (phoneTab.value !== 'account' && !tabs.some(t => t.id === phoneTab.value)) resetPhoneTab();
 });
+
+// Unread messages, for the badge on the phone's Alerts tab
+const unreadCount = ref(0);
+async function loadUnread() {
+  if (!currentUser.value) return;
+  try {
+    unreadCount.value = (await fetchNotifications()).filter(n => !n.read).length;
+  } catch (err) {
+    unreadCount.value = 0;
+  }
+}
 
 // A shift reminder (tapped phone alert or ?view=checkin link) opens Check in
 function openView(view) {
@@ -365,8 +410,40 @@ function onServiceWorkerMessage(e) {
 navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
 
 function navigateTo(view) {
+  if (view === 'account') {
+    // The avatar opens Settings on My account
+    settingsSection.value = 'account';
+    settingsKey.value += 1;
+    view = 'settings';
+  }
   activeView.value = view;
   narrowOpen.value = false;
+}
+
+// ---------------- driver page ----------------
+function openDriver(id, from = 'board') {
+  openedDriverId.value = id;
+  driverFrom.value = from;
+  selectedDriverId.value = id;
+  activeView.value = 'driver';
+}
+
+function closeDriver() {
+  activeView.value = driverFrom.value;
+}
+
+// Company link on a driver page: Fleet, filtered to that company
+function openFleetCompany(companyId) {
+  if (!isManager.value) return;
+  fleetCompanyId.value = '';
+  activeView.value = 'fleet';
+  fleetCompanyId.value = companyId;
+}
+
+// "All of this driver's actions": Reports › Activity, searched for them
+function openActivity(preset) {
+  reportsPreset.value = { ...preset };
+  activeView.value = 'reports';
 }
 // Today's action records (staff: their own and their shift-mates', manager: the team) for the sidebar and KPI cards
 const todayActivities = ref([]);
@@ -493,7 +570,11 @@ async function enterTeam() {
   signResetTimer = setInterval(runSignReset, 60000);
   // Teammates' actions show up in the sidebar and KPI cards within a minute
   if (todayTimer) clearInterval(todayTimer);
-  todayTimer = setInterval(loadTodayActivities, 60000);
+  todayTimer = setInterval(() => {
+    loadTodayActivities();
+    if (isPhone.value) loadUnread();
+  }, 60000);
+  loadUnread();
 }
 
 function leaveTeam() {
@@ -507,8 +588,10 @@ function leaveTeam() {
   companies.value = [];
   drivers.value = [];
   todayActivities.value = [];
+  unreadCount.value = 0;
   confirmState.value = null;
-  activeView.value = 'fleet';
+  activeView.value = 'board';
+  openedDriverId.value = '';
 }
 
 // Whenever a (different) user signs in - restored session, sign in, or a new
@@ -517,7 +600,7 @@ function leaveTeam() {
 let restoringSession = true;
 watch(() => currentUser.value?.id, async (id, oldId) => {
   if (!id || id === oldId) return;
-  activeView.value = 'fleet';
+  activeView.value = 'board';
   resetPhoneTab();
   // Opened from a shift reminder: go straight to Check in
   const params = new URLSearchParams(window.location.search);
@@ -799,6 +882,17 @@ async function handleReorderCompany({ draggedId, targetId, position }) {
 // ---------------------------------------------------------------------------
 // Driver Management
 // ---------------------------------------------------------------------------
+// Board / Fleet primary action: the company can be picked in the dialog
+function openAddDriver(companyId = '') {
+  if (!companies.value.length) {
+    showErrorToast('Add a company first', isManager.value ? 'Drivers are grouped by company: add one from the board\'s More menu or Fleet.' : 'Ask a manager to add a company.');
+    return;
+  }
+  editingDriver.value = null;
+  targetCompanyId.value = companyId || '';
+  showDriverModal.value = true;
+}
+
 function openAddDriverForCompany(company) {
   editingDriver.value = null;
   targetCompanyId.value = company.id;
@@ -938,8 +1032,37 @@ function deleteDriver(driverId) {
     onConfirm: async () => {
       drivers.value = drivers.value.filter(d => d.id !== driverId);
       if (selectedDriverId.value === driverId) selectedDriverId.value = '';
+      // Deleted from its own page: back to where it was opened from
+      if (activeView.value === 'driver' && openedDriverId.value === driverId) closeDriver();
       if (await persist(db.deleteDriver(driverId), 'Driver not deleted')) {
         showToast({ title: 'Driver deleted', message: `${label} · logs kept` });
+      }
+    }
+  });
+}
+
+// Fleet bulk actions: status, company or inactive for several drivers at once
+async function bulkUpdateDrivers(list) {
+  if (!list.length) return;
+  const byId = new Map(list.map(d => [d.id, d]));
+  drivers.value = sortDrivers(drivers.value.map(d => (byId.has(d.id) ? { ...d, ...byId.get(d.id) } : d)));
+  if (await persist(Promise.all(list.map(d => db.updateDriver(d))), 'Drivers not saved')) {
+    showToast({ title: `${list.length} ${list.length === 1 ? 'driver' : 'drivers'} updated`, message: 'Teammates see the change live' });
+  }
+}
+
+function bulkDeleteDrivers(ids) {
+  if (!isManager.value || !ids.length) return;
+  askConfirm({
+    title: `Delete ${ids.length} ${ids.length === 1 ? 'driver' : 'drivers'}?`,
+    body: 'They are removed from the board. Past log entries keep their names.',
+    ok: 'Delete drivers',
+    onConfirm: async () => {
+      const gone = new Set(ids);
+      drivers.value = drivers.value.filter(d => !gone.has(d.id));
+      if (gone.has(selectedDriverId.value)) selectedDriverId.value = '';
+      if (await persist(Promise.all(ids.map(id => db.deleteDriver(id))), 'Drivers not deleted')) {
+        showToast({ title: `${ids.length} ${ids.length === 1 ? 'driver' : 'drivers'} deleted`, message: 'Logs kept' });
       }
     }
   });
@@ -1011,11 +1134,19 @@ function handleResetData() {
 .phone-user { font-size: 12px; color: var(--color-accent-300); }
 .live-dot { width: 7px; height: 7px; flex-shrink: 0; background: var(--color-neutral-600); }
 .live-dot.is-live { background: var(--color-accent-400); }
-.phone-signout {
-  width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center;
-  border: 0; background: transparent; color: var(--color-accent-300); cursor: pointer;
+.phone-avatar {
+  width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; cursor: pointer;
+  border: 0; background: var(--color-accent-200); color: var(--color-accent-800);
+  font-family: var(--font-heading); font-weight: 600; font-size: 15px;
 }
-.phone-signout:active { background: var(--color-accent-800); color: var(--color-bg); }
+.phone-avatar.is-on { box-shadow: inset 0 0 0 2px var(--color-accent-400); }
+.phone-account { gap: 10px; }
+.phone-account .back { align-self: flex-start; min-height: 44px; }
+.phone-badge {
+  position: absolute; top: -6px; right: -10px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 600; background: var(--color-signal); color: var(--color-bg);
+}
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .phone-main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 .phone-main > .cb-page { padding-bottom: 20px; }

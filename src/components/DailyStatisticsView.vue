@@ -1,10 +1,8 @@
 <template>
-  <div class="cb-page cb-scroll stats">
+  <div :class="embedded ? 'cb-embedded stats' : 'cb-page cb-scroll stats'">
+    <!-- Filter, right above the numbers -->
     <div class="cb-page-head">
-      <div class="title-block">
-        <h2 class="cb-title">Statistics</h2>
-        <span class="cb-sub">Action-button records only · {{ rangeLabel }}</span>
-      </div>
+      <span class="cb-sub">Action-button records only · {{ rangeLabel }} · click a day to see its records</span>
       <div class="cb-spacer"></div>
       <DateRangePicker :from="fromDay" :to="toDay" :max="today" :maxDays="MAX_DAYS" @change="setRange" />
     </div>
@@ -38,9 +36,9 @@
             </span>
           </div>
           <div class="columns">
-            <div v-for="col in chartCols" :key="col.date" class="column" :title="col.title">
+            <button v-for="col in chartCols" :key="col.date" type="button" class="column" :title="`${col.title} · open its records`" @click="emit('open-day', col.date)">
               <span v-for="s in SHIFTS_TOP_DOWN" :key="s.code" class="seg-bar" :style="{ height: `${col.pct[s.code]}%`, background: SHIFT_COLORS[s.code] }"></span>
-            </div>
+            </button>
           </div>
           <div class="col-labels">
             <span v-for="col in chartCols" :key="col.date" :class="{ 'in-range': col.inRange }">{{ col.short }}</span>
@@ -107,9 +105,12 @@ import {
 import { initials } from '../utils/format';
 
 const props = defineProps({
+  // Shown inside the Reports page (its header and tabs are above)
+  embedded: { type: Boolean, default: false },
   // Bumped by the app after this user records an action
   refreshKey: { type: Number, default: 0 }
 });
+const emit = defineEmits(['open-day']);
 
 // The longest range is one month
 const MAX_DAYS = 31;
@@ -227,7 +228,8 @@ onMounted(() => {
 .legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-neutral-700); }
 .swatch { width: 10px; height: 10px; }
 .columns { display: flex; align-items: flex-end; gap: 4px; height: 200px; border-bottom: 1px solid var(--color-divider); }
-.column { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
+.column {
+  border: 0; padding: 0; background: transparent; cursor: pointer; font: inherit; flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
 .column:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 .seg-bar { display: block; flex-shrink: 0; }
 .col-labels { display: flex; gap: 4px; }

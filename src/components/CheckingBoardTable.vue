@@ -3,7 +3,7 @@
     <!-- Title, search, actions -->
     <div class="top">
       <div class="title-block">
-        <h2 class="cb-title">{{ currentTab.label }}</h2>
+        <h2 class="cb-title">Board</h2>
         <span class="cb-sub">{{ currentTab.subtitle }}</span>
       </div>
       <div class="cb-spacer"></div>
@@ -23,14 +23,13 @@
         </button>
         <span v-else class="cb-key search-key">/</span>
       </div>
-      <button class="btn btn-secondary" @click="$emit('reset-data')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
-        Reset to Ready
-      </button>
-      <button v-if="canManageFleet && currentTab.id === 'CHECKING_BOARD'" class="btn btn-primary" @click="$emit('add-company')">
+      <!-- The one primary action of the board -->
+      <button class="btn btn-primary" @click="$emit('add-driver-new')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
-        Company
+        Add driver
       </button>
+      <!-- Rare and destructive actions -->
+      <MoreMenu :items="menuItems" label="More board actions" @select="onMenu" />
     </div>
 
     <!-- KPI strip -->
@@ -47,8 +46,12 @@
         <span class="cb-num kpi-num">{{ kpi.within }}<span class="kpi-of"> / {{ kpi.active }}</span></span>
         <span class="cb-bar kpi-bar"><span :style="{ width: `${kpi.withinPct}%`, background: 'var(--color-accent)' }"></span></span>
       </div>
-      <button :class="['cb-panel', 'kpi', 'kpi-btn', { 'is-alert': kpi.overdue.length }]" @click="jumpToOldest">
-        <div class="kpi-head"><span class="cb-label">Overdue · 4h+</span><span class="kpi-side">Jump to oldest →</span></div>
+      <button
+        :class="['cb-panel', 'kpi', 'kpi-btn', { 'is-alert': kpi.overdue.length }]"
+        :aria-pressed="attention.overdue ? 'true' : 'false'"
+        @click="showOverdue"
+      >
+        <div class="kpi-head"><span class="cb-label">Overdue · 4h+</span><span class="kpi-side">{{ attention.overdue ? 'Showing only these' : 'Show only these →' }}</span></div>
         <span :class="['cb-num', 'kpi-num', { 'is-signal': kpi.overdue.length }]">{{ kpi.overdue.length }}</span>
         <span class="kpi-foot cb-ellipsis">{{ kpi.oldestLabel }}</span>
       </button>
@@ -58,6 +61,64 @@
         <div class="hours">
           <span v-for="h in kpi.hours" :key="h.key" :title="h.title" :style="{ height: `${h.pct}%`, background: h.future ? 'var(--color-neutral-300)' : 'var(--color-accent-500)' }"></span>
         </div>
+      </div>
+    </div>
+
+    <!-- Filters, right above the table they filter -->
+    <div class="filters">
+      <div class="seg status-seg" role="group" aria-label="Status">
+        <button
+          v-for="(tab, index) in tabs"
+          :key="tab.id"
+          type="button"
+          :class="['seg-btn', 'status-btn', { 'is-on': activeTabId === tab.id, 'is-drag': draggedTabId === tab.id }]"
+          :style="tabDropStyle(tab.id)"
+          :aria-pressed="activeTabId === tab.id ? 'true' : 'false'"
+          :draggable="index > 0"
+          :title="index > 0 ? `${tab.subtitle} · drag to reorder` : tab.subtitle"
+          @click="$emit('select-tab', tab.id)"
+          @dragstart="onTabDragStart(tab, index, $event)"
+          @dragend="onTabDragEnd"
+          @dragover.prevent="onTabDragOver(tab, index, $event)"
+          @drop.prevent="onTabDrop(index)"
+        >
+          <span>{{ index === 0 ? 'All active' : tab.label }}</span>
+          <span class="status-count">{{ tabCounts[tab.id] || 0 }}</span>
+        </button>
+      </div>
+      <div class="attention" role="group" aria-label="Needs attention">
+        <span class="cb-label attention-label">Needs attention</span>
+        <button
+          type="button"
+          :class="['cb-chip', 'is-signal', { 'is-on': attention.overdue }]"
+          :aria-pressed="attention.overdue ? 'true' : 'false'"
+          title="Not checked for 4 hours or more"
+          @click="toggleAttention('overdue')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+          Overdue <span class="cb-chip-count">{{ attentionCounts.overdue }}</span>
+        </button>
+        <button
+          type="button"
+          :class="['cb-chip', { 'is-on': attention.unsigned }]"
+          :aria-pressed="attention.unsigned ? 'true' : 'false'"
+          title="Sign is NO SIGN"
+          @click="toggleAttention('unsigned')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          No sign <span class="cb-chip-count">{{ attentionCounts.unsigned }}</span>
+        </button>
+        <button
+          type="button"
+          :class="['cb-chip', { 'is-on': attention.flagged }]"
+          :aria-pressed="attention.flagged ? 'true' : 'false'"
+          title="Flagged rows"
+          @click="toggleAttention('flagged')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><path d="M4 22v-7" fill="none" /></svg>
+          Flagged <span class="cb-chip-count">{{ attentionCounts.flagged }}</span>
+        </button>
+        <button v-if="anyAttention" type="button" class="cb-link clear-filters" @click="clearAttention">Clear</button>
       </div>
     </div>
 
@@ -83,6 +144,7 @@
               {{ allCollapsed ? 'Expand all' : 'Collapse all' }}
             </button>
           </div>
+          <div class="check-head">Check</div>
         </div>
 
         <div v-if="companies.length === 0" class="empty">
@@ -119,6 +181,7 @@
               :dropPosition="dropTarget?.driverId === row.driver.id ? dropTarget.position : ''"
               :canDelete="canManageFleet && currentTab.id === 'CHECKING_BOARD'"
               @select-row="$emit('select-driver', $event)"
+              @open="$emit('open-driver', $event)"
               @update="$emit('update-driver', $event)"
               @delete="$emit('delete-driver', $event)"
               @edit="$emit('edit-driver', $event)"
@@ -134,40 +197,32 @@
           </template>
         </div>
 
-        <div v-if="noResults" class="empty">No drivers match “{{ searchQuery }}”.</div>
+        <div v-if="noResults" class="empty">
+          No drivers match {{ searchText ? `“${searchQuery}”` : 'these filters' }}{{ searchText && anyAttention ? ' and these filters' : '' }}.
+          <button type="button" class="cb-link" @click="clearAll">Clear</button>
+        </div>
       </div>
 
-      <!-- Sheet tabs -->
-      <nav class="cb-scroll tabs">
-        <button
-          v-for="(tab, index) in tabs"
-          :key="tab.id"
-          :class="['tab', { 'is-on': activeTabId === tab.id, 'is-drag': draggedTabId === tab.id }]"
-          :style="tabDropStyle(tab.id)"
-          :draggable="index > 0"
-          :title="index > 0 ? 'Drag to reorder tab' : ''"
-          @click="$emit('select-tab', tab.id)"
-          @dragstart="onTabDragStart(tab, index, $event)"
-          @dragend="onTabDragEnd"
-          @dragover.prevent="onTabDragOver(tab, index, $event)"
-          @drop.prevent="onTabDrop(index)"
-        >
-          <span>{{ tab.label }}</span>
-          <span class="tab-count">{{ tabCounts[tab.id] || 0 }}</span>
-        </button>
-        <div class="tabs-fill"></div>
-        <div class="hint">Hover a row for actions · ↑↓ move · C check · E edit · / search · Esc clear</div>
-      </nav>
+      <div class="board-foot">
+        <span>Click a name to open the driver</span>
+        <span><span class="cb-key">↑</span> <span class="cb-key">↓</span> move</span>
+        <span><span class="cb-key">Enter</span> open</span>
+        <span><span class="cb-key">C</span> check</span>
+        <span><span class="cb-key">E</span> edit</span>
+        <span><span class="cb-key">/</span> search</span>
+        <span><span class="cb-key">Esc</span> clear</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
 import CompanyHeaderRow from './CompanyHeaderRow.vue';
 import DriverRow from './DriverRow.vue';
-import { BOTTOM_TABS } from '../config/statusConfig';
-import { getFreshnessInfo } from '../utils/freshness';
+import MoreMenu from './MoreMenu.vue';
+import { BOTTOM_TABS, isFlagged } from '../config/statusConfig';
+import { getFreshnessInfo, currentFreshnessTimestamp } from '../utils/freshness';
 import { getShiftConfig, shiftProgress, currentWorkDay, clockTashkent } from '../config/shifts';
 import { driverLabel } from '../utils/format';
 
@@ -190,7 +245,8 @@ const props = defineProps({
 const emit = defineEmits([
   'add-driver', 'edit-driver', 'delete-driver', 'update-driver', 'edit-company', 'delete-company',
   'select-driver', 'reorder-driver', 'reorder-company',
-  'select-tab', 'reorder-tabs', 'update:searchQuery', 'reset-data', 'add-company'
+  'select-tab', 'reorder-tabs', 'update:searchQuery', 'reset-data', 'add-company',
+  'add-driver-new', 'open-driver'
 ]);
 
 const searchRef = ref(null);
@@ -202,8 +258,33 @@ const currentTab = computed(() => props.tabs.find(t => t.id === props.activeTabI
 const collapsedCompanies = ref({});
 const searchText = computed(() => props.searchQuery.trim().toLowerCase());
 
+// "Needs attention" filters; they combine with the status and the search
+const attention = ref({ overdue: false, unsigned: false, flagged: false });
+const anyAttention = computed(() => Object.values(attention.value).some(Boolean));
+
+function needsAttention(d) {
+  const a = attention.value;
+  if (a.overdue && getFreshnessInfo(d.lastCheckedAt).level !== 'overdue') return false;
+  if (a.unsigned && d.sign === 'SIGNED') return false;
+  if (a.flagged && !isFlagged(d)) return false;
+  return true;
+}
+
+function toggleAttention(key) {
+  attention.value = { ...attention.value, [key]: !attention.value[key] };
+}
+
+function clearAttention() {
+  attention.value = { overdue: false, unsigned: false, flagged: false };
+}
+
+function clearAll() {
+  clearAttention();
+  emit('update:searchQuery', '');
+}
+
 function isCompanyCollapsed(companyId) {
-  if (searchText.value) return false; // a search opens every matching company
+  if (searchText.value || anyAttention.value) return false; // a search or filter opens every matching company
   return collapsedCompanies.value[companyId] !== false;
 }
 
@@ -218,14 +299,32 @@ function toggleAllCompanies() {
   props.companies.forEach(c => { collapsedCompanies.value[c.id] = next; });
 }
 
-function companyDrivers(company) {
+function matchesSearch(d, company) {
   const q = searchText.value;
+  return !q || `${d.name} ${d.unit} ${d.notes} ${company?.name || ''}`.toLowerCase().includes(q);
+}
+
+function companyDrivers(company) {
+  void currentFreshnessTimestamp.value;
   return props.drivers.filter(d =>
     d.companyId === company.id &&
     currentTab.value.filterFn(d) &&
-    (!q || `${d.name} ${d.unit} ${d.notes} ${company.name}`.toLowerCase().includes(q))
+    matchesSearch(d, company) &&
+    needsAttention(d)
   );
 }
+
+// Counts on the "Needs attention" chips: within the status and search shown
+const attentionCounts = computed(() => {
+  void currentFreshnessTimestamp.value;
+  const byId = new Map(props.companies.map(c => [c.id, c]));
+  const shown = props.drivers.filter(d => currentTab.value.filterFn(d) && matchesSearch(d, byId.get(d.companyId)));
+  return {
+    overdue: shown.filter(d => getFreshnessInfo(d.lastCheckedAt).level === 'overdue').length,
+    unsigned: shown.filter(d => d.sign !== 'SIGNED').length,
+    flagged: shown.filter(isFlagged).length
+  };
+});
 
 const groups = computed(() => {
   let n = 0;
@@ -239,10 +338,10 @@ const groups = computed(() => {
         rows: drivers.map(driver => ({ driver, n: ++n }))
       };
     })
-    .filter(g => g.drivers.length || (currentTab.value.id === 'CHECKING_BOARD' && !searchText.value));
+    .filter(g => g.drivers.length || (currentTab.value.id === 'CHECKING_BOARD' && !searchText.value && !anyAttention.value));
 });
 
-const noResults = computed(() => !!searchText.value && groups.value.length === 0);
+const noResults = computed(() => (!!searchText.value || anyAttention.value) && groups.value.length === 0);
 
 // Drivers in board order that are on screen (for ↑ ↓)
 const visibleIds = computed(() => groups.value.flatMap(g => (g.expanded ? g.rows.map(r => r.driver.id) : [])));
@@ -310,14 +409,32 @@ async function scrollToDriver(id) {
   el?.scrollIntoView({ block: 'nearest' });
 }
 
-function jumpToOldest() {
+// Overdue card: show only the overdue drivers, oldest selected
+function showOverdue() {
+  if (attention.value.overdue) {
+    toggleAttention('overdue');
+    return;
+  }
+  attention.value = { ...attention.value, overdue: true };
+  emit('select-tab', 'CHECKING_BOARD');
   const oldest = kpi.value.oldest;
   if (!oldest) return;
-  emit('select-tab', 'CHECKING_BOARD');
-  emit('update:searchQuery', '');
-  collapsedCompanies.value[oldest.companyId] = false;
   emit('select-driver', oldest.id);
   scrollToDriver(oldest.id);
+}
+
+// ---------------- More menu ----------------
+const menuItems = computed(() => [
+  ...(props.canManageFleet ? [{ id: 'add-company', label: 'Add company' }] : []),
+  { id: 'toggle-all', label: allCollapsed.value ? 'Expand every company' : 'Collapse every company' },
+  { id: 'div', divider: true },
+  { id: 'reset', label: 'Reset fleet to Ready…', danger: true }
+]);
+
+function onMenu(id) {
+  if (id === 'add-company') emit('add-company');
+  else if (id === 'toggle-all') toggleAllCompanies();
+  else if (id === 'reset') emit('reset-data');
 }
 
 // ---------------- search ----------------
@@ -361,6 +478,13 @@ function handleKey(e) {
   }
   const driver = props.drivers.find(d => d.id === props.selectedDriverId);
   if (!driver) return;
+  if (e.key === 'Enter') {
+    // Leave buttons and links to do their own thing
+    if (tag === 'button' || tag === 'a') return;
+    e.preventDefault();
+    emit('open-driver', driver.id);
+    return;
+  }
   const key = e.key.toLowerCase();
   if (key === 'c') {
     emit('update-driver', { ...driver, lastCheckedAt: new Date().toISOString() });
@@ -370,9 +494,15 @@ function handleKey(e) {
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', handleKey);
   clockTimer = setInterval(() => { now.value = Date.now(); }, 30000);
 });
+// The board stays alive (open companies, scroll) while a driver page is open;
+// its shortcuts only listen while it is on screen
+onActivated(() => {
+  window.addEventListener('keydown', handleKey);
+  if (props.selectedDriverId) scrollToDriver(props.selectedDriverId);
+});
+onDeactivated(() => window.removeEventListener('keydown', handleKey));
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKey);
   clearInterval(clockTimer);
@@ -504,7 +634,7 @@ function tabDropStyle(tabId) {
 <style scoped>
 .board-page {
   --board-num-col: 52px;
-  --board-cols: 52px minmax(240px, 1.3fr) 128px 168px 108px minmax(160px, 1.6fr);
+  --board-cols: 52px minmax(240px, 1.3fr) 128px 168px 108px minmax(160px, 1.6fr) 100px;
   height: 100%; display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; min-height: 0;
 }
 .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -563,38 +693,33 @@ function tabDropStyle(tabId) {
   font-size: 13px; color: var(--color-neutral-700); border-bottom: 1px solid var(--color-hairline);
 }
 
-.tabs {
-  display: flex; align-items: stretch; height: 40px; flex-shrink: 0; overflow-x: auto; overflow-y: hidden;
+.filters { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.status-seg { flex-wrap: wrap; }
+.status-btn { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.status-btn.is-drag { opacity: 0.4; }
+.status-count {
+  font-size: 11px; font-weight: 500; min-width: 20px; padding: 1px 5px; text-align: center;
+  background: var(--color-neutral-200); color: var(--color-neutral-800);
+}
+.status-btn.is-on .status-count { background: var(--color-accent-800); color: var(--color-bg); }
+.attention { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.attention-label { white-space: nowrap; }
+.clear-filters { font-size: 13px; }
+.check-head { text-align: left; }
+
+.board-foot {
+  display: flex; align-items: center; gap: 6px 16px; flex-wrap: wrap; flex-shrink: 0; padding: 8px 14px;
   border-top: 1px solid var(--color-divider); background: var(--color-neutral-200);
+  font-size: 12px; color: var(--color-neutral-700);
 }
-.tab {
-  display: flex; align-items: center; gap: 6px; padding: 0 14px; white-space: nowrap; flex-shrink: 0;
-  border: 0; border-right: 1px solid var(--color-divider); margin-top: -1px; cursor: pointer;
-  font-family: var(--font-heading); font-weight: 600; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase;
-  background: transparent; color: var(--color-neutral-700);
-}
-.tab:first-child { border-left: 1px solid var(--color-divider); }
-.tab:hover:not(.is-on) { color: var(--color-text); }
-.tab.is-on { background: var(--color-bg); color: var(--color-text); box-shadow: inset 0 2px 0 var(--color-accent); }
-.tab.is-drag { opacity: 0.4; }
-.tab-count {
-  font-family: var(--font-body); font-size: 11px; font-weight: 500; min-width: 20px; padding: 1px 5px; text-align: center;
-  background: var(--color-neutral-300); color: var(--color-neutral-800);
-}
-.tab.is-on .tab-count { background: var(--color-accent); color: var(--color-bg); }
-.tabs-fill { flex: 1; min-width: 12px; }
-.hint {
-  display: flex; align-items: center; padding: 0 14px; font-size: 12px; color: var(--color-neutral-700);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1;
-}
+.board-foot .cb-key { font-family: var(--font-body); font-size: 11px; }
 
 @media (max-width: 1240px) {
   .board-page {
     --board-num-col: 44px;
-    --board-cols: 44px minmax(170px, 1.4fr) 108px 140px 80px minmax(90px, 1fr);
+    --board-cols: 44px minmax(170px, 1.4fr) 108px 140px 80px minmax(90px, 1fr) 92px;
   }
-  .tab { padding: 0 9px; font-size: 12px; letter-spacing: 0.02em; }
-  .hint { display: none; }
+  .board-foot { display: none; }
 }
 @media (max-width: 1100px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -603,7 +728,7 @@ function tabDropStyle(tabId) {
 @media (max-width: 900px) {
   .board-page {
     --board-num-col: 36px;
-    --board-cols: 36px minmax(150px, 1.4fr) 96px 124px 72px minmax(110px, 1fr);
+    --board-cols: 36px minmax(150px, 1.4fr) 96px 124px 72px minmax(110px, 1fr) 88px;
     gap: 10px; padding: 12px;
   }
   .title-block { flex: 1 1 100%; }

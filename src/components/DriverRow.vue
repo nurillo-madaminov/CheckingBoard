@@ -24,15 +24,13 @@
     <!-- Driver -->
     <div class="driver">
       <span v-if="driver.unit" class="unit">{{ driver.unit }}</span>
-      <span class="name" :title="driver.name">{{ driver.name }}</span>
+      <!-- Opens the driver's page (status, notes, history) -->
+      <button type="button" class="name" :title="`Open ${driver.name}`" @click.stop="openDriver">{{ driver.name }}</button>
       <svg v-if="flagged" class="flag" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></svg>
       <span class="cb-spacer"></span>
 
       <!-- Actions are logged by the Leader ELD extension, not from the board -->
       <div v-if="hover" class="row-actions" @click.stop>
-        <button class="btn btn-ghost btn-icon" title="Mark checked (C)" @click="markAsChecked">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-        </button>
         <button class="btn btn-ghost btn-icon" :title="flagged ? 'Remove flag' : 'Flag row'" @click="toggleFlag">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></svg>
         </button>
@@ -88,6 +86,19 @@
         @keyup.enter="$event.target.blur()"
       />
     </div>
+
+    <!-- Check: the most-used action, always visible (C on the keyboard) -->
+    <div class="check-cell" @click.stop>
+      <button
+        type="button"
+        :class="['btn', fresh.level === 'overdue' ? 'btn-primary' : 'btn-secondary', 'check-btn']"
+        :title="`Mark ${driver.name} checked (C)`"
+        @click="markAsChecked"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+        Check
+      </button>
+    </div>
   </div>
 </template>
 
@@ -106,7 +117,7 @@ const props = defineProps({
   canDelete: { type: Boolean, default: false }
 });
 
-const emit = defineEmits(['update', 'delete', 'edit', 'select-row', 'drag-start', 'drag-end', 'row-dragover', 'row-drop']);
+const emit = defineEmits(['update', 'delete', 'edit', 'select-row', 'open', 'drag-start', 'drag-end', 'row-dragover', 'row-drop']);
 
 const hover = ref(false);
 const localNotes = ref(props.driver.notes || '');
@@ -128,6 +139,11 @@ const rowStyle = computed(() => {
 
 function onSelectLine() {
   emit('select-row', props.driver.id);
+}
+
+function openDriver() {
+  onSelectLine();
+  emit('open', props.driver.id);
 }
 
 function markAsChecked() {
@@ -189,7 +205,14 @@ function onDragStart(e) {
   color: var(--color-accent-800); background: var(--color-accent-100); border: 1px solid var(--color-accent-200);
   padding: 1px 6px; min-width: 40px; text-align: center; flex-shrink: 0;
 }
-.name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+.name {
+  min-width: 0; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left;
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--color-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.name:hover { color: var(--color-accent-700); text-decoration: underline; text-underline-offset: 2px; }
+.check-cell { padding: 0 10px 0 4px; }
+.check-btn { padding: 4px 9px; font-size: 13px; }
 .flag { color: var(--color-accent-700); flex-shrink: 0; }
 .row-actions { display: flex; gap: 1px; flex-shrink: 0; }
 .row-actions .btn-icon { width: 26px; height: 26px; }

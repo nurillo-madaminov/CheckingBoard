@@ -38,7 +38,7 @@ function mapProfile(row) {
     displayName: row.display_name,
     role: row.role,
     isActive: row.is_active,
-    // Position on the Shifts page (null until a manager has ordered the list)
+    // Position on the Staff › Schedule page (null until a manager has ordered the list)
     scheduleOrder: row.schedule_order ?? null,
     createdAt: row.created_at
   };
@@ -297,7 +297,7 @@ export async function saveShiftSchedule(rows) {
 }
 
 /**
- * Manager sets the order of people on the Shifts page: [staff ids], top to bottom
+ * Manager sets the order of people on Staff › Schedule: [staff ids], top to bottom
  */
 export async function saveScheduleOrder(ids) {
   const { error } = await supabase.rpc('save_schedule_order', { p_ids: ids });

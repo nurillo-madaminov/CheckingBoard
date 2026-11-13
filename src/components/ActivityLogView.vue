@@ -1,13 +1,8 @@
 <template>
-  <div class="cb-page cb-scroll logs">
-    <div class="cb-page-head">
-      <div class="title-block">
-        <h2 class="cb-title">Logs</h2>
-        <span class="cb-sub">
-          {{ scopeLabel }} for the work day (shifts that started that day, Tashkent time)
-        </span>
-      </div>
-      <div class="cb-spacer"></div>
+  <div :class="embedded ? 'cb-embedded logs' : 'cb-page cb-scroll logs'">
+    <span class="cb-sub">{{ scopeLabel }} for the work day (shifts that started that day, Tashkent time)</span>
+    <!-- Filters, right above the records -->
+    <div class="cb-page-head filters">
 
       <!-- Work day -->
       <div class="stepper">
@@ -107,6 +102,10 @@ import {
 import { initials } from '../utils/format';
 
 const props = defineProps({
+  // Shown inside the Reports page (its header and tabs are above)
+  embedded: { type: Boolean, default: false },
+  // Open with these filters: { search?, day?, shift? } (from a driver page or a statistic)
+  preset: { type: Object, default: null },
   activeDrivers: { type: Array, default: () => [] },
   // Bumped by the app after this user records an action
   refreshKey: { type: Number, default: 0 }
@@ -131,11 +130,20 @@ const scopeLabel = computed(() => {
 const shiftOptions = [{ code: '', label: 'All' }, ...SHIFTS.map(s => ({ code: s.code, label: s.label }))];
 
 const filters = reactive({
-  day: today,
-  shift: '',
+  day: props.preset?.day || today,
+  shift: props.preset?.shift || '',
   staffUserId: '',
   actionType: '',
-  search: ''
+  search: props.preset?.search || ''
+});
+
+watch(() => props.preset, (p) => {
+  if (!p) return;
+  filters.day = p.day || today;
+  filters.shift = p.shift || '';
+  filters.search = p.search || '';
+  filters.actionType = '';
+  filters.staffUserId = '';
 });
 
 const activities = ref([]);

@@ -18,35 +18,19 @@
       </button>
     </div>
 
-    <!-- Views -->
-    <nav class="nav">
-      <button :class="['nav-item', { 'is-on': activeView === 'fleet' }]" title="Board" @click="$emit('navigate', 'fleet')">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="1" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
-        <span class="nav-label fade">Board</span>
-        <span class="nav-count fade">{{ boardCount }}</span>
-      </button>
-      <button :class="['nav-item', { 'is-on': activeView === 'activity_log' }]" title="Logs" @click="$emit('navigate', 'activity_log')">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></svg>
-        <span class="nav-label fade">Logs</span>
-        <span class="nav-count fade">{{ logsToday }}</span>
-      </button>
-      <template v-if="isManager">
-        <button :class="['nav-item', { 'is-on': activeView === 'shifts' }]" title="Shifts" @click="$emit('navigate', 'shifts')">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h5" /><path d="M17.5 17.5 16 16.3V14" /><circle cx="16" cy="16" r="6" /></svg>
-          <span class="nav-label fade">Shifts</span>
-        </button>
-        <button :class="['nav-item', { 'is-on': activeView === 'statistics' }]" title="Statistics" @click="$emit('navigate', 'statistics')">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
-          <span class="nav-label fade">Statistics</span>
-        </button>
-        <button :class="['nav-item', { 'is-on': activeView === 'team' }]" title="Team: members and attendance" @click="$emit('navigate', 'team')">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-          <span class="nav-label fade">Team</span>
-        </button>
-      </template>
-      <button :class="['nav-item', { 'is-on': activeView === 'extensions' }]" title="Extensions" @click="$emit('navigate', 'extensions')">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" /></svg>
-        <span class="nav-label fade">Extensions</span>
+    <!-- Sections, most used first -->
+    <nav class="nav" aria-label="Main">
+      <button
+        v-for="item in items"
+        :key="item.id"
+        :class="['nav-item', { 'is-on': activeView === item.id }]"
+        :title="item.title"
+        :aria-current="activeView === item.id ? 'page' : null"
+        @click="$emit('navigate', item.id)"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="item.icon"></svg>
+        <span class="nav-label fade">{{ item.label }}</span>
+        <span v-if="item.count !== undefined" class="nav-count fade">{{ item.count }}</span>
       </button>
     </nav>
 
@@ -95,11 +79,11 @@
 
     <!-- Me -->
     <div class="me">
-      <button :class="['me-btn', { 'is-on': activeView === 'profile' }]" title="Profile settings" @click="$emit('navigate', 'profile')">
+      <button :class="['me-btn', { 'is-on': activeView === 'settings' }]" title="My account" @click="$emit('navigate', 'account')">
         <span class="cb-avatar me-avatar">{{ myInitials }}</span>
         <span class="me-text fade">
           <span class="cb-ellipsis me-name">{{ currentUser?.displayName }}</span>
-          <span class="dim small me-role">{{ roleLabel(currentUser?.role) }} · Profile settings</span>
+          <span class="dim small me-role">{{ roleLabel(currentUser?.role) }} · My account</span>
         </span>
       </button>
       <button class="signout" title="Sign out" @click="$emit('logout')">
@@ -138,6 +122,25 @@ onMounted(() => { timer = setInterval(() => { now.value = new Date(); }, 15000);
 onUnmounted(() => clearInterval(timer));
 
 const isManager = computed(() => canManage(props.currentUser?.role));
+
+const ICONS = {
+  board: '<rect width="18" height="18" x="3" y="3" rx="1" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" />',
+  fleet: '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" /><path d="M15 18H9" /><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14" /><circle cx="17" cy="18" r="2" /><circle cx="7" cy="18" r="2" />',
+  staff: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />',
+  reports: '<path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />',
+  settings: '<path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" />'
+};
+
+// Board, Fleet, Staff, Reports, Settings (Fleet and Staff are for managers and supervisors)
+const items = computed(() => [
+  { id: 'board', label: 'Board', title: 'Board: live checking', count: props.boardCount },
+  ...(isManager.value ? [
+    { id: 'fleet', label: 'Fleet', title: 'Fleet: drivers and companies' },
+    { id: 'staff', label: 'Staff', title: 'Staff: today, schedule, attendance, members' }
+  ] : []),
+  { id: 'reports', label: 'Reports', title: 'Reports: activity and statistics', count: logsToday.value },
+  { id: 'settings', label: 'Settings', title: 'Settings: account, rules, office, extensions' }
+].map(item => ({ ...item, icon: ICONS[item.id] })));
 const myInitials = computed(() => initials(props.currentUser?.displayName));
 const duty = computed(() => shiftProgress(now.value));
 const dutyShift = computed(() => getShiftConfig(duty.value.code));
