@@ -6,7 +6,8 @@ import { ref } from 'vue';
  * Must match public.cb_shift_of in supabase_schema.sql, which stamps every
  * activity with its shift_code and shift_date (the work day the shift started on).
  * Hours are minutes after Tashkent midnight; a manager can change them per
- * shift and per weekday (public.shift_hours), anything not set uses the defaults.
+ * shift and per weekday, or turn a shift off on a day (public.shift_hours); anything
+ * not set uses the defaults.
  * People are put on a shift day by day (public.shift_assignments); a weekday
  * without a shift is that person's day off.
  */
@@ -54,13 +55,14 @@ export const WEEKDAYS = [
   { iso: 7, label: 'Sunday', short: 'Sun' }
 ];
 
-// The team's custom hours: { 'MORNING-1': { startMin, endMin }, ... }
+// The team's custom hours: { 'MORNING-1': { startMin, endMin, off }, ... }
+// (off: the shift does not run on that weekday)
 export const customShiftHours = ref({});
 
 export function setCustomShiftHours(rows) {
   customShiftHours.value = Object.fromEntries((rows || []).map(r => [
     `${r.shift_code}-${r.weekday}`,
-    { startMin: r.start_min, endMin: r.end_min }
+    { startMin: r.start_min, endMin: r.end_min, off: !!r.is_off }
   ]));
 }
 
@@ -126,12 +128,22 @@ export function parseMinutes(hhmm) {
   return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
 }
 
-// { startMin, endMin } of a shift on a work day: the team's custom hours, else the default
+// { startMin, endMin, off } of a shift on a work day: the team's custom hours, else the default
 export function hoursOn(shiftCode, workDay) {
   const custom = customShiftHours.value[`${shiftCode}-${isoWeekday(workDay)}`];
   if (custom) return custom;
   const s = getShiftConfig(shiftCode);
-  return { startMin: s.startMin, endMin: s.endMin };
+  return { startMin: s.startMin, endMin: s.endMin, off: false };
+}
+
+// Does this shift run on a work day? (a manager can turn a shift off on a weekday)
+export function shiftRunsOn(shiftCode, workDay) {
+  return !hoursOn(shiftCode, workDay).off;
+}
+
+// The shifts that run on a work day, in the usual order
+export function shiftsRunningOn(workDay) {
+  return SHIFTS.filter(s => shiftRunsOn(s.code, workDay));
 }
 
 // UTC instant of a Tashkent wall-clock time (minutes after midnight) on a given date
@@ -165,12 +177,13 @@ function nearestRun(runs, now) {
  * The shift run a moment belongs to, by the same rule as public.cb_shift_of:
  * the run (started yesterday or today) that covers it, the earlier-starting one
  * in an overlap; between runs, the nearest one. { code, day, start, end }
+ * Days a shift is turned off are skipped; null when a given shift ran neither day.
  */
 export function placeShift(now = new Date(), assignedCode = '') {
   const today = tashkentDate(now);
   const runs = SHIFTS
     .filter(s => !assignedCode || s.code === assignedCode)
-    .flatMap(s => [shiftRun(s.code, addDays(today, -1)), shiftRun(s.code, today)]);
+    .flatMap(s => [addDays(today, -1), today].filter(day => shiftRunsOn(s.code, day)).map(day => shiftRun(s.code, day)));
   return nearestRun(runs, now);
 }
 
@@ -199,7 +212,7 @@ export function placeStaffShift(now = new Date(), staffId = '') {
   const runs = [-1, 0, 1].flatMap(offset => {
     const day = addDays(today, offset);
     const code = shiftOn(staffId, day);
-    if (!code) return [];
+    if (!code || !shiftRunsOn(code, day)) return [];
     const run = shiftRun(code, day);
     return offset === 1 && run.start - now > CHECK_IN_OPENS_MS ? [] : [run];
   });
@@ -213,7 +226,7 @@ export function nextStaffShift(now = new Date(), staffId = '') {
   for (let offset = 0; offset <= 7; offset += 1) {
     const day = addDays(today, offset);
     const code = shiftOn(staffId, day);
-    if (!code) continue;
+    if (!code || !shiftRunsOn(code, day)) continue;
     const run = shiftRun(code, day);
     if (run.start > now) return run;
   }
@@ -266,6 +279,7 @@ export function currentShiftCode(now = new Date()) {
 export function shiftsOnDuty(now = new Date()) {
   const today = tashkentDate(now);
   return SHIFTS.filter(s => [addDays(today, -1), today].some(day => {
+    if (!shiftRunsOn(s.code, day)) return false;
     const run = shiftRun(s.code, day);
     return now >= run.start && now < run.end;
   })).map(s => s.code);

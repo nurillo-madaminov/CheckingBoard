@@ -349,7 +349,8 @@ CREATE POLICY "Members record activities as themselves"
 -- Shifts run on Tashkent time (UTC+5, no daylight saving). Default hours:
 --   MORNING 07:00-15:00, AFTERNOON 13:00-23:00, NIGHT 23:00-07:00
 -- A manager can change the hours of each shift, separately for each day of the
--- week (public.shift_hours; days without a row use the defaults), and schedules
+-- week, or turn a shift off on a day (public.shift_hours; days without a row use
+-- the defaults), and schedules
 -- people on a shift day by day (public.shift_assignments).
 -- An action is credited to the shift its author is scheduled on that day; on a
 -- day off, or with no schedule, it is placed by the clock (in an overlap, the
@@ -360,6 +361,8 @@ CREATE POLICY "Members record activities as themselves"
 
 -- Custom hours, minutes after Tashkent midnight; weekday 1 = Monday ... 7 = Sunday
 -- of the day the shift starts. end_min <= start_min means it ends the next day.
+-- is_off: the shift does not run on that weekday (for example two 12-hour shifts
+-- at the weekend instead of three); its hours are kept for when it is turned back on.
 CREATE TABLE IF NOT EXISTS public.shift_hours (
     team_id TEXT NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
     shift_code TEXT NOT NULL CHECK (shift_code IN ('MORNING', 'AFTERNOON', 'NIGHT')),
@@ -370,6 +373,7 @@ CREATE TABLE IF NOT EXISTS public.shift_hours (
     PRIMARY KEY (team_id, shift_code, weekday),
     CHECK (start_min <> end_min)
 );
+ALTER TABLE public.shift_hours ADD COLUMN IF NOT EXISTS is_off BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.shift_hours ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Members read their team shift hours" ON public.shift_hours;
 -- Read-only to clients; managers change it through save_shift_hours
@@ -377,7 +381,8 @@ CREATE POLICY "Members read their team shift hours"
     ON public.shift_hours FOR SELECT TO authenticated
     USING (team_id = public.current_team_id());
 
--- Hours of one shift on one work day (custom row, else the default)
+-- Hours of one shift on one work day (custom row, else the default).
+-- No row when the shift does not run that day.
 CREATE OR REPLACE FUNCTION public.cb_shift_hours(p_team TEXT, p_shift TEXT, p_day DATE)
 RETURNS TABLE (start_min INT, end_min INT)
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -387,7 +392,7 @@ AS $$
     FROM (VALUES ('MORNING', 420, 900), ('AFTERNOON', 780, 1380), ('NIGHT', 1380, 420)) AS d(code, start_min, end_min)
     LEFT JOIN public.shift_hours h
       ON h.team_id = p_team AND h.shift_code = d.code AND h.weekday = extract(isodow FROM p_day)::int
-    WHERE d.code = p_shift
+    WHERE d.code = p_shift AND NOT coalesce(h.is_off, false)
 $$;
 
 -- The old two-argument version placed shifts by fixed hours
@@ -901,6 +906,14 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM jsonb_to_recordset(coalesce(p_schedule, '[]'::jsonb))
             AS r(staff_id TEXT, weekday INT, shift_code TEXT)
+        JOIN public.shift_hours h
+          ON h.team_id = v_team AND h.shift_code = r.shift_code AND h.weekday = r.weekday AND h.is_off
+    ) THEN
+        RAISE EXCEPTION 'Someone is scheduled on a shift that does not run on that day';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_to_recordset(coalesce(p_schedule, '[]'::jsonb))
+            AS r(staff_id TEXT, weekday INT, shift_code TEXT)
         WHERE NOT EXISTS (
             SELECT 1 FROM public.staff_profiles p
             WHERE p.id = r.staff_id AND p.team_id = v_team AND p.is_active
@@ -919,8 +932,9 @@ END;
 $$;
 
 -- Manager replaces the team's shift hours:
---   [{"shift_code": "MORNING", "weekday": 1, "start_min": 420, "end_min": 900}, ...]
--- Days left out use the default hours.
+--   [{"shift_code": "MORNING", "weekday": 1, "start_min": 420, "end_min": 900, "is_off": false}, ...]
+-- Days left out use the default hours. is_off turns the shift off on that day
+-- (at least one shift must run every day); people scheduled on it get the day off.
 CREATE OR REPLACE FUNCTION public.save_shift_hours(p_hours JSONB)
 RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER
@@ -942,13 +956,26 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'A shift cannot start and end at the same time';
     END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_to_recordset(coalesce(p_hours, '[]'::jsonb))
+            AS r(shift_code TEXT, weekday INT, is_off BOOLEAN)
+        WHERE r.is_off
+        GROUP BY r.weekday HAVING count(DISTINCT r.shift_code) >= 3
+    ) THEN
+        RAISE EXCEPTION 'At least one shift must run on every day';
+    END IF;
 
     DELETE FROM public.shift_hours WHERE team_id = v_team;
     -- The table checks reject unknown shifts, days and times
-    INSERT INTO public.shift_hours (team_id, shift_code, weekday, start_min, end_min)
-    SELECT v_team, r.shift_code, r.weekday, r.start_min, r.end_min
+    INSERT INTO public.shift_hours (team_id, shift_code, weekday, start_min, end_min, is_off)
+    SELECT v_team, r.shift_code, r.weekday, r.start_min, r.end_min, coalesce(r.is_off, false)
     FROM jsonb_to_recordset(coalesce(p_hours, '[]'::jsonb))
-        AS r(shift_code TEXT, weekday INT, start_min INT, end_min INT);
+        AS r(shift_code TEXT, weekday INT, start_min INT, end_min INT, is_off BOOLEAN);
+    -- People scheduled on a shift that no longer runs that day get the day off
+    DELETE FROM public.shift_assignments a
+    USING public.shift_hours h
+    WHERE a.team_id = v_team AND h.team_id = v_team
+      AND h.shift_code = a.shift_code AND h.weekday = a.weekday AND h.is_off;
 END;
 $$;
 

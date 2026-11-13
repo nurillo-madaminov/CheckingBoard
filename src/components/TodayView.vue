@@ -110,8 +110,9 @@ function personState(person, run, phase) {
   return { state: 'missing', main: phase === 'ended' ? 'No check-in' : 'Not checked in', tag: 'Missing', lateTag: true, missing: true };
 }
 
-// Always Morning, Afternoon, Night (the order of SHIFTS), whichever is on now
-const groups = computed(() => SHIFTS.map(s => {
+// Morning, Afternoon, Night (the order of SHIFTS), whichever is on now; a shift
+// turned off both yesterday and today has no run to show
+const groups = computed(() => SHIFTS.filter(s => placeShift(now.value, s.code)).map(s => {
   const run = placeShift(now.value, s.code);
   const phase = now.value < run.start ? 'soon' : now.value < run.end ? 'on' : 'ended';
   const minsTo = Math.max(0, Math.round((run.start - now.value) / 60000));
