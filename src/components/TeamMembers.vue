@@ -33,6 +33,7 @@
             <button class="btn btn-ghost" :disabled="isSaving" @click="askToggleActive(profile)">
               {{ profile.isActive ? 'Deactivate' : 'Activate' }}
             </button>
+            <button class="btn btn-ghost btn-danger" :disabled="isSaving" @click="deleteTarget = profile">Delete</button>
           </template>
           <span v-else class="you">You · edit in Settings › My account</span>
         </div>
@@ -97,6 +98,14 @@
       @confirm="confirmDeactivate"
       @cancel="confirmTarget = null"
     />
+    <ConfirmDialog
+      v-if="deleteTarget"
+      :title="`Delete ${deleteTarget.displayName}?`"
+      body="Their account is removed for good and they can no longer sign in. Past log entries, check-ins and events keep their name. To keep the account for later, deactivate it instead."
+      okLabel="Delete member"
+      @confirm="confirmDelete"
+      @cancel="deleteTarget = null"
+    />
   </div>
 </template>
 
@@ -110,7 +119,8 @@ import {
   createStaffAccount,
   setStaffRole,
   resetStaffPassword,
-  setStaffActive
+  setStaffActive,
+  deleteStaffAccount
 } from '../services/authService';
 import { scheduleSummary } from '../config/shifts';
 import { ROLES, roleLabel } from '../config/roles';
@@ -125,6 +135,7 @@ const isSaving = ref(false);
 const resetTargetId = ref('');
 const resetPasswordValue = ref('');
 const confirmTarget = ref(null);
+const deleteTarget = ref(null);
 
 const newStaffForm = reactive({ displayName: '', username: '', password: '', role: 'staff' });
 
@@ -176,6 +187,12 @@ async function confirmDeactivate() {
   const profile = confirmTarget.value;
   confirmTarget.value = null;
   await run(() => setStaffActive(profile.id, false), `${profile.displayName} has been deactivated. Their log entries are kept.`);
+}
+
+async function confirmDelete() {
+  const profile = deleteTarget.value;
+  deleteTarget.value = null;
+  await run(() => deleteStaffAccount(profile.id), `${profile.displayName} has been deleted. Their log entries are kept.`);
 }
 
 async function changeRole(profile, event) {

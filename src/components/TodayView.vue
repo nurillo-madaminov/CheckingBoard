@@ -10,22 +10,6 @@
 
     <div v-if="errorMessage" class="cb-error">{{ errorMessage }}</div>
 
-    <!-- Shifts on now -->
-    <div class="cb-panel totals">
-      <div class="total main">
-        <span class="total-num">{{ totals.inNow }}<span class="of">/{{ totals.expected }}</span></span>
-        <span class="total-label">Checked in · on shift now</span>
-      </div>
-      <div :class="['total', { 'is-signal': totals.late }]">
-        <span class="total-num">{{ totals.late }}</span>
-        <span class="total-label">Late</span>
-      </div>
-      <div :class="['total', { 'is-signal': totals.missing }]">
-        <span class="total-num">{{ totals.missing }}</span>
-        <span class="total-label">Not in</span>
-      </div>
-    </div>
-
     <!-- Each shift: its run nearest to now, and its people -->
     <section v-for="g in groups" :key="g.code" class="group">
       <div class="group-head">
@@ -113,10 +97,18 @@ function personState(person, run, phase) {
   return { state: 'missing', main: phase === 'ended' ? 'No check-in' : 'Not checked in', tag: 'Missing', lateTag: true, missing: true };
 }
 
-// Morning, Afternoon, Night (the order of SHIFTS), whichever is on now; a shift
-// turned off both yesterday and today has no run to show
-const groups = computed(() => SHIFTS.filter(s => placeShift(now.value, s.code)).map(s => {
-  const run = placeShift(now.value, s.code);
+// The shifts of the work day in progress, in order (Morning, Afternoon, Night): a day
+// with two 12-hour shifts shows two. A shift turned off today does not show
+// yesterday's ended run instead.
+const groups = computed(() => {
+  const workDay = currentWorkDay(now.value);
+  return SHIFTS
+    .map(s => ({ s, run: placeShift(now.value, s.code) }))
+    .filter(({ run }) => run && !(now.value >= run.end && run.day < workDay))
+    .map(({ s, run }) => groupOf(s, run));
+});
+
+function groupOf(s, run) {
   const phase = now.value < run.start ? 'soon' : now.value < run.end ? 'on' : 'ended';
   const minsTo = Math.max(0, Math.round((run.start - now.value) / 60000));
   const minsLeft = Math.max(0, Math.round((run.end - now.value) / 60000));
@@ -134,7 +126,7 @@ const groups = computed(() => SHIFTS.filter(s => placeShift(now.value, s.code)).
     dayWord: run.day === currentWorkDay(now.value) ? 'today' : `on ${formatWorkDay(run.day).split(',')[0]}`,
     people
   };
-}));
+}
 
 // Scheduled people who are in none of the runs shown above: their day off
 const offToday = computed(() => {
@@ -142,16 +134,6 @@ const offToday = computed(() => {
   return roster.value.filter(p => !listed.has(p.id));
 });
 
-// Counts for the shifts on duty right now
-const totals = computed(() => {
-  const onNow = groups.value.filter(g => g.phase === 'on').flatMap(g => g.people);
-  return {
-    expected: onNow.length,
-    inNow: onNow.filter(p => p.in).length,
-    late: onNow.filter(p => p.late).length,
-    missing: onNow.filter(p => p.missing).length
-  };
-});
 
 async function load() {
   errorMessage.value = '';
@@ -182,15 +164,7 @@ onUnmounted(() => clearInterval(timer));
 .today { user-select: text; }
 .title-block { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 
-.totals { display: grid; grid-template-columns: 1.6fr 1fr 1fr; }
-.total { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-left: 1px solid var(--color-divider); }
-.total:first-child { border-left: 0; }
-.total.main { background: var(--color-accent-900); color: var(--color-bg); }
-.total-num { font-family: var(--font-heading); font-weight: 600; font-size: 34px; line-height: 1; }
 .of { font-size: 20px; opacity: 0.7; }
-.total-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-neutral-700); }
-.total.main .total-label { color: var(--color-accent-300); }
-.total.is-signal .total-num, .total.is-signal .total-label { color: var(--color-signal); }
 
 .group { display: flex; flex-direction: column; gap: 8px; }
 .group-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

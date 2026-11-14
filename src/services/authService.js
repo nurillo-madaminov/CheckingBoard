@@ -275,6 +275,21 @@ export async function resetStaffPassword(staffId, newPassword) {
   if (error) throw friendlyError(error, 'Failed to reset password');
 }
 
+/**
+ * Manager or supervisor deletes a member for good (login and profile). Past log
+ * entries, check-ins and events keep their name.
+ */
+export async function deleteStaffAccount(staffId) {
+  const { error } = await supabase.rpc('delete_staff_account', { p_staff_id: staffId });
+  if (error) {
+    if (/delete_staff_account|schema cache/i.test(error.message || '')) {
+      throw new Error('Deleting members needs the updated database script. Run supabase_schema.sql in the Supabase SQL Editor, then try again.');
+    }
+    throw friendlyError(error, 'Failed to delete the member');
+  }
+  await loadTeamRoster();
+}
+
 export async function setStaffActive(staffId, isActive) {
   const { error } = await supabase.rpc('set_staff_active', { p_staff_id: staffId, p_active: !!isActive });
   if (error) throw friendlyError(error, 'Failed to update account status');

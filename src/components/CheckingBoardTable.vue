@@ -23,13 +23,6 @@
         </button>
         <span v-else class="cb-key search-key">/</span>
       </div>
-      <!-- The one primary action of the board -->
-      <button class="btn btn-primary" @click="$emit('add-driver-new')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
-        Add driver
-      </button>
-      <!-- Rare and destructive actions -->
-      <MoreMenu :items="menuItems" label="More board actions" @select="onMenu" />
     </div>
 
     <!-- KPI strip -->
@@ -46,12 +39,8 @@
         <span class="cb-num kpi-num">{{ kpi.within }}<span class="kpi-of"> / {{ kpi.active }}</span></span>
         <span class="cb-bar kpi-bar"><span :style="{ width: `${kpi.withinPct}%`, background: 'var(--color-accent)' }"></span></span>
       </div>
-      <button
-        :class="['cb-panel', 'kpi', 'kpi-btn', { 'is-alert': kpi.overdue.length }]"
-        :aria-pressed="attention.overdue ? 'true' : 'false'"
-        @click="showOverdue"
-      >
-        <div class="kpi-head"><span class="cb-label">Overdue · 4h+</span><span class="kpi-side">{{ attention.overdue ? 'Showing only these' : 'Show only these →' }}</span></div>
+      <button :class="['cb-panel', 'kpi', 'kpi-btn', { 'is-alert': kpi.overdue.length }]" @click="jumpToOldest">
+        <div class="kpi-head"><span class="cb-label">Overdue · 4h+</span><span class="kpi-side">Jump to oldest →</span></div>
         <span :class="['cb-num', 'kpi-num', { 'is-signal': kpi.overdue.length }]">{{ kpi.overdue.length }}</span>
         <span class="kpi-foot cb-ellipsis">{{ kpi.oldestLabel }}</span>
       </button>
@@ -86,69 +75,35 @@
           <span class="status-count">{{ tabCounts[tab.id] || 0 }}</span>
         </button>
       </div>
-      <div class="attention" role="group" aria-label="Needs attention">
-        <span class="cb-label attention-label">Needs attention</span>
-        <button
-          type="button"
-          :class="['cb-chip', 'is-signal', { 'is-on': attention.overdue }]"
-          :aria-pressed="attention.overdue ? 'true' : 'false'"
-          title="Not checked for 4 hours or more"
-          @click="toggleAttention('overdue')"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
-          Overdue <span class="cb-chip-count">{{ attentionCounts.overdue }}</span>
-        </button>
-        <button
-          type="button"
-          :class="['cb-chip', { 'is-on': attention.unsigned }]"
-          :aria-pressed="attention.unsigned ? 'true' : 'false'"
-          title="Sign is NO SIGN"
-          @click="toggleAttention('unsigned')"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          No sign <span class="cb-chip-count">{{ attentionCounts.unsigned }}</span>
-        </button>
-        <button
-          type="button"
-          :class="['cb-chip', { 'is-on': attention.flagged }]"
-          :aria-pressed="attention.flagged ? 'true' : 'false'"
-          title="Flagged rows"
-          @click="toggleAttention('flagged')"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><path d="M4 22v-7" fill="none" /></svg>
-          Flagged <span class="cb-chip-count">{{ attentionCounts.flagged }}</span>
-        </button>
-        <button v-if="anyAttention" type="button" class="cb-link clear-filters" @click="clearAttention">Clear</button>
-      </div>
     </div>
 
     <!-- Board -->
     <div class="cb-panel board">
       <div ref="scrollRef" class="cb-scroll board-scroll" @dragover.prevent @drop.prevent="onContainerDrop">
         <div class="col-head">
-          <div class="center">#</div>
+          <div class="center">
+            <!-- Opens or closes every company -->
+            <button
+              type="button"
+              class="toggle-all"
+              :title="allCollapsed ? 'Expand every company' : 'Collapse every company'"
+              :aria-label="allCollapsed ? 'Expand every company' : 'Collapse every company'"
+              @click="toggleAllCompanies"
+            >
+              <svg v-if="allCollapsed" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" /></svg>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 20 5-5 5 5" /><path d="m7 4 5 5 5-5" /></svg>
+            </button>
+          </div>
           <div class="driver-head">Driver</div>
           <div>Sign</div>
           <div>Status</div>
           <div>Last check</div>
-          <div class="notes-head">
-            <span>Notes</span>
-            <button
-              class="toggle-all"
-              :title="allCollapsed ? 'Open every company' : 'Close every company'"
-              @click="toggleAllCompanies"
-            >
-              <!-- arrows apart = expand, arrows together = collapse -->
-              <svg v-if="allCollapsed" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" /></svg>
-              <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 20 5-5 5 5" /><path d="m7 4 5 5 5-5" /></svg>
-              {{ allCollapsed ? 'Expand all' : 'Collapse all' }}
-            </button>
-          </div>
+          <div class="notes-head">Notes</div>
           <div class="check-head">Check</div>
         </div>
 
         <div v-if="companies.length === 0" class="empty">
-          {{ canManageFleet ? 'No companies yet. Add one with + Company.' : 'No companies yet. A manager adds companies.' }}
+          {{ canManageFleet ? 'No companies yet. Add them on the Fleet page.' : 'No companies yet. A manager adds companies.' }}
         </div>
 
         <div v-for="(group, gIdx) in groups" :key="group.company.id">
@@ -162,7 +117,6 @@
             :isDragging="draggedCompanyId === group.company.id"
             :dropPosition="dropTargetCompany?.companyId === group.company.id ? dropTargetCompany.position : ''"
             @toggle-collapse="toggleCompanyCollapse(group.company.id)"
-            @add-driver="$emit('add-driver', group.company)"
             @edit-company="$emit('edit-company', group.company)"
             @delete-company="$emit('delete-company', group.company.id)"
             @company-drag-start="handleCompanyDragStart"
@@ -181,7 +135,6 @@
               :dropPosition="dropTarget?.driverId === row.driver.id ? dropTarget.position : ''"
               :canDelete="canManageFleet && currentTab.id === 'CHECKING_BOARD'"
               @select-row="$emit('select-driver', $event)"
-              @open="$emit('open-driver', $event)"
               @update="$emit('update-driver', $event)"
               @delete="$emit('delete-driver', $event)"
               @edit="$emit('edit-driver', $event)"
@@ -192,21 +145,16 @@
             />
             <div v-if="group.rows.length === 0" class="group-empty">
               No drivers yet in {{ group.company.name }}.
-              <button v-if="currentTab.id === 'CHECKING_BOARD'" class="btn btn-ghost" @click="$emit('add-driver', group.company)">Add the first driver</button>
             </div>
           </template>
         </div>
 
-        <div v-if="noResults" class="empty">
-          No drivers match {{ searchText ? `“${searchQuery}”` : 'these filters' }}{{ searchText && anyAttention ? ' and these filters' : '' }}.
-          <button type="button" class="cb-link" @click="clearAll">Clear</button>
-        </div>
+        <div v-if="noResults" class="empty">No drivers match “{{ searchQuery }}”.</div>
       </div>
 
       <div class="board-foot">
-        <span>Click a name to open the driver</span>
+        <span>Hover a row for flag, edit and delete</span>
         <span><span class="cb-key">↑</span> <span class="cb-key">↓</span> move</span>
-        <span><span class="cb-key">Enter</span> open</span>
         <span><span class="cb-key">C</span> check</span>
         <span><span class="cb-key">E</span> edit</span>
         <span><span class="cb-key">/</span> search</span>
@@ -220,9 +168,8 @@
 import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
 import CompanyHeaderRow from './CompanyHeaderRow.vue';
 import DriverRow from './DriverRow.vue';
-import MoreMenu from './MoreMenu.vue';
-import { BOTTOM_TABS, isFlagged } from '../config/statusConfig';
-import { getFreshnessInfo, currentFreshnessTimestamp } from '../utils/freshness';
+import { BOTTOM_TABS } from '../config/statusConfig';
+import { getFreshnessInfo } from '../utils/freshness';
 import { getShiftConfig, shiftProgress, currentWorkDay, clockTashkent } from '../config/shifts';
 import { driverLabel } from '../utils/format';
 
@@ -243,10 +190,9 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  'add-driver', 'edit-driver', 'delete-driver', 'update-driver', 'edit-company', 'delete-company',
+  'edit-driver', 'delete-driver', 'update-driver', 'edit-company', 'delete-company',
   'select-driver', 'reorder-driver', 'reorder-company',
-  'select-tab', 'reorder-tabs', 'update:searchQuery', 'reset-data', 'add-company',
-  'add-driver-new', 'open-driver'
+  'select-tab', 'reorder-tabs', 'update:searchQuery'
 ]);
 
 const searchRef = ref(null);
@@ -258,33 +204,8 @@ const currentTab = computed(() => props.tabs.find(t => t.id === props.activeTabI
 const collapsedCompanies = ref({});
 const searchText = computed(() => props.searchQuery.trim().toLowerCase());
 
-// "Needs attention" filters; they combine with the status and the search
-const attention = ref({ overdue: false, unsigned: false, flagged: false });
-const anyAttention = computed(() => Object.values(attention.value).some(Boolean));
-
-function needsAttention(d) {
-  const a = attention.value;
-  if (a.overdue && getFreshnessInfo(d.lastCheckedAt).level !== 'overdue') return false;
-  if (a.unsigned && d.sign === 'SIGNED') return false;
-  if (a.flagged && !isFlagged(d)) return false;
-  return true;
-}
-
-function toggleAttention(key) {
-  attention.value = { ...attention.value, [key]: !attention.value[key] };
-}
-
-function clearAttention() {
-  attention.value = { overdue: false, unsigned: false, flagged: false };
-}
-
-function clearAll() {
-  clearAttention();
-  emit('update:searchQuery', '');
-}
-
 function isCompanyCollapsed(companyId) {
-  if (searchText.value || anyAttention.value) return false; // a search or filter opens every matching company
+  if (searchText.value) return false; // a search opens every matching company
   return collapsedCompanies.value[companyId] !== false;
 }
 
@@ -305,26 +226,12 @@ function matchesSearch(d, company) {
 }
 
 function companyDrivers(company) {
-  void currentFreshnessTimestamp.value;
   return props.drivers.filter(d =>
     d.companyId === company.id &&
     currentTab.value.filterFn(d) &&
-    matchesSearch(d, company) &&
-    needsAttention(d)
+    matchesSearch(d, company)
   );
 }
-
-// Counts on the "Needs attention" chips: within the status and search shown
-const attentionCounts = computed(() => {
-  void currentFreshnessTimestamp.value;
-  const byId = new Map(props.companies.map(c => [c.id, c]));
-  const shown = props.drivers.filter(d => currentTab.value.filterFn(d) && matchesSearch(d, byId.get(d.companyId)));
-  return {
-    overdue: shown.filter(d => getFreshnessInfo(d.lastCheckedAt).level === 'overdue').length,
-    unsigned: shown.filter(d => d.sign !== 'SIGNED').length,
-    flagged: shown.filter(isFlagged).length
-  };
-});
 
 const groups = computed(() => {
   let n = 0;
@@ -338,10 +245,10 @@ const groups = computed(() => {
         rows: drivers.map(driver => ({ driver, n: ++n }))
       };
     })
-    .filter(g => g.drivers.length || (currentTab.value.id === 'CHECKING_BOARD' && !searchText.value && !anyAttention.value));
+    .filter(g => g.drivers.length || (currentTab.value.id === 'CHECKING_BOARD' && !searchText.value));
 });
 
-const noResults = computed(() => (!!searchText.value || anyAttention.value) && groups.value.length === 0);
+const noResults = computed(() => !!searchText.value && groups.value.length === 0);
 
 // Drivers in board order that are on screen (for ↑ ↓)
 const visibleIds = computed(() => groups.value.flatMap(g => (g.expanded ? g.rows.map(r => r.driver.id) : [])));
@@ -365,7 +272,8 @@ const kpi = computed(() => {
     COVERED: 'var(--color-accent-500)',
     GOING_TO_DEL: 'var(--color-accent-300)',
     READY: 'var(--color-accent-200)',
-    HOME: 'var(--color-neutral-300)'
+    HOME: 'var(--color-neutral-300)',
+    SHOP: 'var(--color-neutral-400)'
   };
   const mix = Object.keys(mixColors).map(id => {
     const tab = BOTTOM_TABS.find(t => t.id === id);
@@ -409,32 +317,15 @@ async function scrollToDriver(id) {
   el?.scrollIntoView({ block: 'nearest' });
 }
 
-// Overdue card: show only the overdue drivers, oldest selected
-function showOverdue() {
-  if (attention.value.overdue) {
-    toggleAttention('overdue');
-    return;
-  }
-  attention.value = { ...attention.value, overdue: true };
-  emit('select-tab', 'CHECKING_BOARD');
+// Overdue card: select the driver checked longest ago
+function jumpToOldest() {
   const oldest = kpi.value.oldest;
   if (!oldest) return;
+  emit('select-tab', 'CHECKING_BOARD');
+  emit('update:searchQuery', '');
+  collapsedCompanies.value[oldest.companyId] = false;
   emit('select-driver', oldest.id);
   scrollToDriver(oldest.id);
-}
-
-// ---------------- More menu ----------------
-const menuItems = computed(() => [
-  ...(props.canManageFleet ? [{ id: 'add-company', label: 'Add company' }] : []),
-  { id: 'toggle-all', label: allCollapsed.value ? 'Expand every company' : 'Collapse every company' },
-  { id: 'div', divider: true },
-  { id: 'reset', label: 'Reset fleet to Ready…', danger: true }
-]);
-
-function onMenu(id) {
-  if (id === 'add-company') emit('add-company');
-  else if (id === 'toggle-all') toggleAllCompanies();
-  else if (id === 'reset') emit('reset-data');
 }
 
 // ---------------- search ----------------
@@ -478,13 +369,6 @@ function handleKey(e) {
   }
   const driver = props.drivers.find(d => d.id === props.selectedDriverId);
   if (!driver) return;
-  if (e.key === 'Enter') {
-    // Leave buttons and links to do their own thing
-    if (tag === 'button' || tag === 'a') return;
-    e.preventDefault();
-    emit('open-driver', driver.id);
-    return;
-  }
   const key = e.key.toLowerCase();
   if (key === 'c') {
     emit('update-driver', { ...driver, lastCheckedAt: new Date().toISOString() });
@@ -679,10 +563,10 @@ function tabDropStyle(tabId) {
 .col-head > div { padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .col-head .center { text-align: center; padding-inline: 0; }
 .driver-head { padding-inline: 12px !important; }
-.notes-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 8px 0 12px !important; }
+.notes-head { padding-inline: 12px !important; }
+.col-head > .center { display: grid; place-items: center; padding: 6px 0; }
 .toggle-all {
-  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; flex-shrink: 0; cursor: pointer;
-  font: inherit; letter-spacing: inherit; text-transform: inherit; font-weight: 600;
+  width: 28px; height: 28px; display: grid; place-items: center; padding: 0; cursor: pointer;
   color: var(--color-accent-700); background: var(--color-bg); border: 1px solid var(--color-accent-400);
 }
 .toggle-all:hover { background: var(--color-accent-100); border-color: var(--color-accent); color: var(--color-accent-800); }
@@ -702,9 +586,6 @@ function tabDropStyle(tabId) {
   background: var(--color-neutral-200); color: var(--color-neutral-800);
 }
 .status-btn.is-on .status-count { background: var(--color-accent-800); color: var(--color-bg); }
-.attention { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.attention-label { white-space: nowrap; }
-.clear-filters { font-size: 13px; }
 .check-head { text-align: left; }
 
 .board-foot {

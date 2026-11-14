@@ -754,6 +754,29 @@ BEGIN
 END;
 $$;
 
+-- Manager or supervisor deletes a member for good: the login, the profile, their
+-- schedule, phones and read marks. Past actions, check-ins, events and messages keep
+-- the name they were saved with. The team always keeps at least one manager.
+CREATE OR REPLACE FUNCTION public.delete_staff_account(p_staff_id TEXT)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    PERFORM public._cb_assert_manages(p_staff_id);
+    IF EXISTS (SELECT 1 FROM public.staff_profiles WHERE id = p_staff_id AND role = 'manager')
+       AND NOT EXISTS (
+           SELECT 1 FROM public.staff_profiles
+           WHERE team_id = public.current_team_id() AND role = 'manager' AND is_active AND id <> p_staff_id
+       ) THEN
+        RAISE EXCEPTION 'A team needs at least one manager. Make someone else a manager first.';
+    END IF;
+    DELETE FROM public.staff_profiles WHERE id = p_staff_id;
+    DELETE FROM auth.sessions WHERE user_id::text = p_staff_id;
+    DELETE FROM auth.users WHERE id::text = p_staff_id;
+END;
+$$;
+
 -- Earlier versions left deactivated members on their shift
 DELETE FROM public.shift_assignments a
 USING public.staff_profiles p
@@ -1075,6 +1098,8 @@ GRANT EXECUTE ON FUNCTION public.create_staff_account(TEXT, TEXT, TEXT, TEXT) TO
 GRANT EXECUTE ON FUNCTION public.set_staff_role(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.reset_staff_password(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_staff_active(TEXT, BOOLEAN) TO authenticated;
+REVOKE ALL ON FUNCTION public.delete_staff_account(TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_staff_account(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_my_display_name(TEXT) TO authenticated;
 
 -- ------------------------------------------------------------------------------
@@ -1865,6 +1890,118 @@ GRANT EXECUTE ON FUNCTION public.claim_shift_reminders(INT) TO service_role;
 REVOKE ALL ON FUNCTION public.setup_shift_reminders(TEXT) FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.cb_cron_config TO service_role;
 GRANT SELECT, INSERT, DELETE ON public.shift_reminders_sent TO service_role;
+
+-- ------------------------------------------------------------------------------
+-- 7F. EVENTS (inspections and accidents, logged from the Events page)
+-- ------------------------------------------------------------------------------
+-- Anyone in the team logs an event and can pin or edit it; managers delete.
+-- The team, author and driver / company names are stamped here, never by the client.
+CREATE TABLE IF NOT EXISTS public.events (
+    id TEXT PRIMARY KEY DEFAULT ('evt-' || replace(gen_random_uuid()::text, '-', '')),
+    team_id TEXT NOT NULL DEFAULT public.current_team_id() REFERENCES public.teams(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('INSPECTION', 'ACCIDENT')),
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    driver_id TEXT REFERENCES public.drivers(id) ON DELETE SET NULL,
+    driver_name_snapshot TEXT NOT NULL DEFAULT '',
+    company_name_snapshot TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL CHECK (outcome IN ('VIOLATION', 'NO_VIOLATION')),
+    level SMALLINT NOT NULL CHECK (level BETWEEN 1 AND 3),
+    notes TEXT NOT NULL DEFAULT '',
+    pinned BOOLEAN NOT NULL DEFAULT false,
+    created_by TEXT REFERENCES public.staff_profiles(id) ON DELETE SET NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS events_team_idx ON public.events (team_id, occurred_at DESC);
+
+CREATE OR REPLACE FUNCTION public.events_stamp()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    me RECORD;
+    drv RECORD;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RETURN NEW;  -- SQL editor / service role maintenance
+    END IF;
+    SELECT id, display_name, team_id INTO me
+    FROM public.staff_profiles WHERE id = auth.uid()::text AND is_active;
+    IF me.id IS NULL THEN
+        RAISE EXCEPTION 'Your account is not active in any team' USING ERRCODE = '42501';
+    END IF;
+
+    IF TG_OP = 'INSERT' THEN
+        NEW.team_id := me.team_id;
+        NEW.created_by := me.id;
+        NEW.created_by_name := me.display_name;
+        NEW.created_at := NOW();
+    ELSE
+        -- Who logged it, for which team and when never change
+        NEW.team_id := OLD.team_id;
+        NEW.created_by := OLD.created_by;
+        NEW.created_by_name := OLD.created_by_name;
+        NEW.created_at := OLD.created_at;
+    END IF;
+    NEW.updated_at := NOW();
+
+    IF TG_OP = 'INSERT' OR NEW.driver_id IS DISTINCT FROM OLD.driver_id THEN
+        IF NEW.driver_id IS NULL THEN
+            IF TG_OP = 'UPDATE' THEN
+                NEW.driver_name_snapshot := OLD.driver_name_snapshot;
+                NEW.company_name_snapshot := OLD.company_name_snapshot;
+            END IF;
+        ELSE
+            SELECT d.id, d.unit, d.name, c.name AS company INTO drv
+            FROM public.drivers d LEFT JOIN public.companies c ON c.id = d.company_id
+            WHERE d.id = NEW.driver_id AND d.team_id = me.team_id;
+            IF drv.id IS NULL THEN
+                RAISE EXCEPTION 'Pick a driver from your team';
+            END IF;
+            NEW.driver_name_snapshot := CASE WHEN coalesce(drv.unit, '') <> '' THEN drv.unit || ' - ' || drv.name ELSE drv.name END;
+            NEW.company_name_snapshot := coalesce(drv.company, '');
+        END IF;
+    ELSE
+        NEW.driver_name_snapshot := OLD.driver_name_snapshot;
+        NEW.company_name_snapshot := OLD.company_name_snapshot;
+    END IF;
+    IF TG_OP = 'INSERT' AND NEW.driver_id IS NULL THEN
+        RAISE EXCEPTION 'Pick the driver the event is about';
+    END IF;
+    NEW.notes := coalesce(NEW.notes, '');
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS events_stamp ON public.events;
+CREATE TRIGGER events_stamp
+    BEFORE INSERT OR UPDATE ON public.events
+    FOR EACH ROW EXECUTE FUNCTION public.events_stamp();
+
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Members read team events" ON public.events;
+DROP POLICY IF EXISTS "Members log events" ON public.events;
+DROP POLICY IF EXISTS "Members edit and pin events" ON public.events;
+DROP POLICY IF EXISTS "Managers delete events" ON public.events;
+CREATE POLICY "Members read team events"
+    ON public.events FOR SELECT TO authenticated
+    USING (team_id = public.current_team_id());
+CREATE POLICY "Members log events"
+    ON public.events FOR INSERT TO authenticated
+    WITH CHECK (team_id = public.current_team_id() AND created_by = auth.uid()::text);
+CREATE POLICY "Members edit and pin events"
+    ON public.events FOR UPDATE TO authenticated
+    USING (team_id = public.current_team_id())
+    WITH CHECK (team_id = public.current_team_id());
+CREATE POLICY "Managers delete events"
+    ON public.events FOR DELETE TO authenticated
+    USING (team_id = public.current_team_id() AND public.is_team_manager());
+
+REVOKE ALL ON public.events FROM anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.events TO authenticated;
+REVOKE ALL ON FUNCTION public.events_stamp() FROM PUBLIC, anon, authenticated;
 
 -- ------------------------------------------------------------------------------
 -- 8. CLAIM THE LEGACY FLEET (run by you in the SQL editor, never from the app)

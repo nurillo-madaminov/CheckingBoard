@@ -43,7 +43,7 @@ export const DRIVER_STATUSES = [
   {
     code: 'SHOP',
     label: 'At Repair Shop',
-    categoryTab: 'HOME',
+    categoryTab: 'SHOP',
     look: { background: 'var(--color-neutral-200)', color: 'var(--color-neutral-800)', border: '1px solid var(--color-neutral-300)' }
   },
   {
@@ -101,9 +101,15 @@ export const BOTTOM_TABS = [
   },
   {
     id: 'HOME',
-    label: 'Home/Shop',
-    subtitle: 'At home / rest-off, or at the repair shop',
-    filterFn: (driver) => ['HOME', 'SHOP'].includes(driver.status)
+    label: 'Home',
+    subtitle: 'At home / rest-off',
+    filterFn: (driver) => driver.status === 'HOME'
+  },
+  {
+    id: 'SHOP',
+    label: 'Shop',
+    subtitle: 'At the repair shop',
+    filterFn: (driver) => driver.status === 'SHOP'
   },
   {
     id: 'INACTIVE',
