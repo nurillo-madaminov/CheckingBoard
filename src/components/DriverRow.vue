@@ -24,8 +24,7 @@
     <!-- Driver -->
     <div class="driver">
       <span v-if="driver.unit" class="unit">{{ driver.unit }}</span>
-      <!-- Opens the driver's page (status, notes, history) -->
-      <button type="button" class="name" :title="`Open ${driver.name}`" @click.stop="openDriver">{{ driver.name }}</button>
+      <span class="name" :title="driver.name">{{ driver.name }}</span>
       <svg v-if="flagged" class="flag" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></svg>
       <span class="cb-spacer"></span>
 
@@ -117,7 +116,7 @@ const props = defineProps({
   canDelete: { type: Boolean, default: false }
 });
 
-const emit = defineEmits(['update', 'delete', 'edit', 'select-row', 'open', 'drag-start', 'drag-end', 'row-dragover', 'row-drop']);
+const emit = defineEmits(['update', 'delete', 'edit', 'select-row', 'drag-start', 'drag-end', 'row-dragover', 'row-drop']);
 
 const hover = ref(false);
 const localNotes = ref(props.driver.notes || '');
@@ -139,11 +138,6 @@ const rowStyle = computed(() => {
 
 function onSelectLine() {
   emit('select-row', props.driver.id);
-}
-
-function openDriver() {
-  onSelectLine();
-  emit('open', props.driver.id);
 }
 
 function markAsChecked() {
@@ -205,12 +199,7 @@ function onDragStart(e) {
   color: var(--color-accent-800); background: var(--color-accent-100); border: 1px solid var(--color-accent-200);
   padding: 1px 6px; min-width: 40px; text-align: center; flex-shrink: 0;
 }
-.name {
-  min-width: 0; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left;
-  font: inherit; font-size: 14px; font-weight: 500; color: var(--color-text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.name:hover { color: var(--color-accent-700); text-decoration: underline; text-underline-offset: 2px; }
+.name { min-width: 0; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
 .check-cell { padding: 0 10px 0 4px; }
 .check-btn { padding: 4px 9px; font-size: 13px; }
 .flag { color: var(--color-accent-700); flex-shrink: 0; }

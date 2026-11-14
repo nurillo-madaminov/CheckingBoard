@@ -12,10 +12,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4z" /></svg>
           Message staff
         </button>
-        <button v-else-if="tab === 'members'" type="button" class="btn btn-primary" @click="goToNewMember">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
-          Add member
-        </button>
       </div>
     </div>
 
@@ -43,7 +39,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed } from 'vue';
 import TodayView from './TodayView.vue';
 import ShiftControlView from './ShiftControlView.vue';
 import AttendanceView from './AttendanceView.vue';
@@ -94,13 +90,6 @@ function onSent(toast) {
   emit('saved', toast);
 }
 
-// The new-account form sits under the member list
-async function goToNewMember() {
-  await nextTick();
-  const field = document.getElementById('new-name');
-  field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  field?.focus({ preventScroll: true });
-}
 </script>
 
 <style scoped>

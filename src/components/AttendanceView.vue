@@ -47,12 +47,17 @@
     <!-- Every check-in -->
     <div class="cb-panel records">
       <div class="rec-row rec-head">
-        <div>Day</div><div>Person</div><div>Shift</div><div>In</div><div>Out</div><div>Late</div><div>From office</div>
+        <div>Person</div><div>Shift</div><div>In</div><div>Out</div><div>Late</div><div>From office</div>
       </div>
       <div v-if="isLoading" class="empty">Loading…</div>
       <template v-else>
-        <div v-for="r in filtered" :key="r.id" :class="['rec-row', { 'is-late': r.is_late }]">
-          <div class="c-day">{{ formatWorkDayShort(r.shift_date) }}</div>
+        <!-- One block per work day, newest first: scrolling down goes back to the start of the month -->
+        <template v-for="g in byDay" :key="g.day">
+        <div class="day-head">
+          <span class="day-name">{{ formatWorkDay(g.day) }}<template v-if="g.day === today"> · Today</template></span>
+          <span class="cb-sub">{{ g.rows.length }} {{ g.rows.length === 1 ? 'check-in' : 'check-ins' }}<template v-if="g.late"> · <span class="is-signal">{{ g.late }} late</span></template></span>
+        </div>
+        <div v-for="r in g.rows" :key="r.id" :class="['rec-row', { 'is-late': r.is_late }]">
           <div class="c-who cb-ellipsis">{{ r.staff_name_snapshot || 'Unknown' }}</div>
           <div class="c-shift">
             {{ getShiftConfig(r.shift_code).label }}
@@ -78,6 +83,7 @@
             {{ Math.round(r.check_in_distance_m) }} m<template v-if="r.check_out_distance_m !== null"> / {{ Math.round(r.check_out_distance_m) }} m</template>
           </div>
         </div>
+        </template>
         <div v-if="!filtered.length" class="empty">No check-ins for this selection.</div>
       </template>
     </div>
@@ -91,7 +97,7 @@ import {
 } from '../services/attendanceService';
 import { staffProfiles, loadTeamRoster } from '../services/authService';
 import {
-  getShiftConfig, currentWorkDay, formatWorkDayShort, formatTashkentClock, formatEasternClock
+  getShiftConfig, currentWorkDay, formatWorkDay, formatWorkDayShort, formatTashkentClock, formatEasternClock
 } from '../config/shifts';
 import { initials } from '../utils/format';
 
@@ -141,6 +147,23 @@ const people = computed(() => {
 });
 
 const filtered = computed(() => (staffFilter.value ? rows.value.filter(r => r.staff_id === staffFilter.value) : rows.value));
+const today = currentWorkDay();
+
+// Check-ins grouped by work day, newest day first
+const byDay = computed(() => {
+  const groups = new Map();
+  filtered.value.forEach(r => {
+    if (!groups.has(r.shift_date)) groups.set(r.shift_date, []);
+    groups.get(r.shift_date).push(r);
+  });
+  return [...groups]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([day, list]) => ({
+      day,
+      rows: [...list].sort((a, b) => Date.parse(a.check_in_at) - Date.parse(b.check_in_at)),
+      late: list.filter(r => r.is_late).length
+    }));
+});
 
 // Per person for the month: shifts, late count and minutes, missing check-outs
 const summary = computed(() => {
@@ -205,12 +228,18 @@ onMounted(() => {
 .avatar { width: 26px; height: 26px; font-size: 10px; }
 
 .rec-row {
-  display: grid; grid-template-columns: 110px minmax(0, 1.2fr) minmax(0, 1.1fr) 110px 110px 100px 110px;
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) 110px 110px 100px 110px;
   align-items: center; gap: 10px; min-height: 48px; padding: 6px 14px; font-size: 13px; border-top: 1px solid var(--color-hairline);
 }
 .rec-row.is-late { background: color-mix(in srgb, var(--color-signal) 6%, transparent); box-shadow: inset 3px 0 0 var(--color-signal); }
 .rec-row > div { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .c-who { display: block !important; font-weight: 500; }
+.day-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 12px; padding: 8px 14px;
+  background: var(--color-neutral-200); border-top: 1px solid var(--color-divider); border-bottom: 1px solid var(--color-divider);
+}
+.day-name { font-family: var(--font-heading); font-weight: 600; font-size: 16px; text-transform: uppercase; }
+.day-head + .rec-row { border-top: 0; }
 .t { font-family: var(--font-heading); font-size: 16px; }
 .small { font-size: 11px; }
 .still-in { font-size: 12px; font-weight: 600; color: var(--color-accent-700); }
@@ -240,14 +269,13 @@ onMounted(() => {
   .records { overflow-x: visible; }
   .rec-head { display: none; }
   .rec-row {
-    min-width: 0; grid-template-columns: 1fr auto; grid-template-areas: "who late" "day dist" "shift shift" "in out";
+    min-width: 0; grid-template-columns: 1fr auto; grid-template-areas: "who late" "shift dist" "in out";
     gap: 4px 10px; padding: 10px 12px;
   }
   .c-who { grid-area: who; font-size: 15px; }
   .c-late { grid-area: late; align-items: flex-end; }
-  .c-day { grid-area: day; color: var(--color-neutral-700); }
   .c-dist { grid-area: dist; align-items: flex-end; }
-  .c-shift { grid-area: shift; flex-direction: row !important; gap: 6px !important; align-items: baseline; }
+  .c-shift { grid-area: shift; flex-direction: row !important; gap: 6px !important; align-items: baseline; flex-wrap: wrap; }
   .c-in { grid-area: in; }
   .c-out { grid-area: out; align-items: flex-end; }
   .c-in::before { content: 'In'; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-neutral-600); }

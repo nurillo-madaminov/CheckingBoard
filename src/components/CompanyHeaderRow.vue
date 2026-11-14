@@ -38,11 +38,8 @@
       <span v-if="overdueCount" class="overdue">{{ overdueCount }} overdue</span>
     </div>
     <div class="cell actions-cell">
-      <!-- Everyone adds drivers; editing and deleting the company is manager-only -->
+      <!-- Editing and deleting the company is manager-only; drivers are added on the Fleet page -->
       <div v-if="showActions && hover" class="actions" @click.stop>
-        <button class="btn btn-ghost add" @click="$emit('add-driver', company)">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>Driver
-        </button>
         <button v-if="canManageFleet" class="btn btn-ghost btn-icon muted" title="Edit company" @click="$emit('edit-company', company)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /><path d="m15 5 4 4" /></svg>
         </button>
@@ -72,7 +69,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  'add-driver', 'edit-company', 'delete-company', 'toggle-collapse',
+  'edit-company', 'delete-company', 'toggle-collapse',
   'company-drag-start', 'company-drag-end', 'company-drag-over', 'company-drop'
 ]);
 

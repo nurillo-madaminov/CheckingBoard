@@ -104,20 +104,15 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
           :todayActivities="todayActivities"
           :keyboardEnabled="!anyDialogOpen"
           @select-driver="selectedDriverId = $event"
-          @open-driver="openDriver($event, 'board')"
           @select-tab="activeTabId = $event"
           @reorder-tabs="handleReorderTabs"
           @reorder-driver="handleReorderDriver"
           @reorder-company="handleReorderCompany"
-          @add-company="openAddCompanyModal"
-          @add-driver="openAddDriverForCompany"
-          @add-driver-new="openAddDriver('')"
           @edit-driver="openEditDriverModal"
           @delete-driver="deleteDriver"
           @update-driver="updateDriver"
           @edit-company="openEditCompanyModal"
           @delete-company="deleteCompany"
-          @reset-data="handleResetData"
         />
 
         <FleetView
@@ -136,6 +131,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
           @update-driver="updateDriver"
           @bulk-update="bulkUpdateDrivers"
           @bulk-delete="bulkDeleteDrivers"
+          @reset-data="handleResetData"
         />
       </KeepAlive>
 
@@ -175,7 +171,17 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         :preset="reportsPreset"
       />
 
-      <!-- 5. SETTINGS: account, attendance rules, office location, extensions -->
+      <!-- 5. EVENTS: inspections and accidents, pinnable -->
+      <EventsView
+        v-else-if="activeView === 'events'"
+        :companies="companies"
+        :drivers="drivers"
+        :isManager="isManager"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
+      />
+
+      <!-- 6. SETTINGS: account, attendance rules, office location, extensions -->
       <SettingsView
         v-else-if="activeView === 'settings'"
         :key="settingsKey"
@@ -256,6 +262,7 @@ import FleetView from './components/FleetView.vue';
 import StaffView from './components/StaffView.vue';
 import ReportsView from './components/ReportsView.vue';
 import SettingsView from './components/SettingsView.vue';
+import EventsView from './components/EventsView.vue';
 import CheckInView from './components/CheckInView.vue';
 import MyShiftsView from './components/MyShiftsView.vue';
 import AlertsView from './components/AlertsView.vue';
@@ -293,7 +300,7 @@ const drivers = ref([]);
 const activityVersion = ref(0); // bumped when new actions arrive so open log views reload
 const attendanceVersion = ref(0); // bumped when a check-in / check-out arrives live
 const activeTabId = ref('CHECKING_BOARD');
-// 'board' | 'driver' | 'fleet' | 'staff' | 'reports' | 'settings'
+// 'board' | 'driver' | 'fleet' | 'staff' | 'reports' | 'events' | 'settings'
 const activeView = ref('board');
 // The driver page: which driver, and the page it was opened from ('board' | 'fleet')
 const openedDriverId = ref('');
@@ -421,7 +428,7 @@ function navigateTo(view) {
 }
 
 // ---------------- driver page ----------------
-function openDriver(id, from = 'board') {
+function openDriver(id, from = 'fleet') {
   openedDriverId.value = id;
   driverFrom.value = from;
   selectedDriverId.value = id;
@@ -753,7 +760,8 @@ const tabCounts = computed(() => {
     READY: allDrivers.filter(d => d.status === 'READY').length,
     COVERED: allDrivers.filter(d => d.status === 'COVERED').length,
     GOING_TO_DEL: allDrivers.filter(d => ['GOING DEL', 'GOING TO DEL'].includes(d.status)).length,
-    HOME: allDrivers.filter(d => ['HOME', 'SHOP'].includes(d.status)).length,
+    HOME: allDrivers.filter(d => d.status === 'HOME').length,
+    SHOP: allDrivers.filter(d => d.status === 'SHOP').length,
     INACTIVE: allDrivers.filter(d => d.status === 'INACTIVE').length
   };
 });
@@ -890,12 +898,6 @@ function openAddDriver(companyId = '') {
   }
   editingDriver.value = null;
   targetCompanyId.value = companyId || '';
-  showDriverModal.value = true;
-}
-
-function openAddDriverForCompany(company) {
-  editingDriver.value = null;
-  targetCompanyId.value = company.id;
   showDriverModal.value = true;
 }
 

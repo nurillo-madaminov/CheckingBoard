@@ -43,18 +43,19 @@ Double-clicking `start.bat` also runs the dev server.
 
 ## 🧭 Where things are
 
-The sidebar has five sections, most used first:
+The sidebar has six sections, most used first:
 
 | Section | What is in it | Who |
 | --- | --- | --- |
-| **Board** | Live checking: status filters and *Needs attention* (overdue, no sign, flagged) above the table, a **Check** button on every row. Click a driver's name (or press Enter) to open their page: status, notes and recent actions. Add company, Reset fleet and Expand all are in the ⋯ menu. | Everyone |
-| **Fleet** | Every driver (inactive too) with filters and bulk actions; companies. | Managers, supervisors |
-| **Staff** | Today (who is in), Schedule, Attendance, Members. *Message staff* sends an alert to everyone, a shift or one person. | Managers, supervisors |
+| **Board** | Live checking only: status filters (Home and Shop apart) above the table and a **Check** button on every row. The icon in the table's top-left corner opens or closes every company; hover a row to flag, edit or delete it. | Everyone |
+| **Fleet** | Every driver (inactive too) with filters and bulk actions; companies. Adding drivers and companies, Reset fleet to Ready and the driver pages (status, notes, recent actions) are here. | Managers, supervisors |
+| **Staff** | Today (the shifts running today and who is in), Schedule, Attendance (by day, newest first), Members (managers and supervisors can deactivate or delete). *Message staff* sends an alert to everyone, a shift or one person. | Managers, supervisors |
 | **Reports** | Activity (every action record) and Statistics; a day in Statistics opens its records. | Everyone (Statistics: managers) |
+| **Events** | Inspections and accidents: driver, violation / no violation, level 1-3, notes. Pin a row to keep it at the top. Managers delete. | Everyone |
 | **Settings** | My account, Attendance rules (late after, reminders), Office location, Extensions. | Everyone (rules and office: managers) |
 
 Every page has the same layout: title and its one primary action at the top right, then tabs or
-filters, then the content. Board shortcuts: ↑ ↓ move, Enter open, C check, E edit, / search, Esc clear.
+filters, then the content. Board shortcuts: ↑ ↓ move, C check, E edit, / search, Esc clear.
 On a driver page: C check, E edit, J / K next / previous, Esc back.
 
 The **phone app** is its own small flow: **Check in**, **My shifts** (the week, shift-mates and the
