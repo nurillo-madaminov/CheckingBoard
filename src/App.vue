@@ -82,6 +82,8 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
       :todayActivities="todayActivities"
       :roster="activeStaffProfiles"
       :onlineIds="onlineIds"
+      :showEld="showEld"
+      :eldCount="eldCount"
       @update:collapsed="toggleSidebar"
       @navigate="navigateTo"
       @logout="handleLogout"
@@ -152,6 +154,17 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         @update-driver="updateDriver"
         @edit-driver="openEditDriverModal"
         @delete-driver="deleteDriver"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
+      />
+
+      <!-- ELD (Dispatch Brain): ELD check against Telegram, search, assistant -->
+      <EldView
+        v-else-if="activeView === 'eld' && showEld"
+        :initialCount="eldCount"
+        @count="eldCount = $event"
+        @saved="showToast($event)"
+        @error="showErrorToast($event.title, $event.message)"
       />
 
       <!-- 3. STAFF (managers): today, schedule, attendance, members -->
@@ -268,6 +281,7 @@ import MyShiftsView from './components/MyShiftsView.vue';
 import AlertsView from './components/AlertsView.vue';
 import ProfileView from './components/ProfileView.vue';
 import TodayView from './components/TodayView.vue';
+import EldView from './components/EldView.vue';
 import { fetchNotifications } from './services/notificationService';
 import { syncPushSubscription, forgetThisDevice } from './services/pushService';
 
@@ -285,6 +299,7 @@ import {
 } from './services/authService';
 import { fetchActivities } from './services/activityService';
 import * as db from './services/supabaseService';
+import { isBrainConfigured, brainAccess, loadBrainAccess, resetBrainAccess, getEldCheck } from './services/dispatchBrainService';
 import { driverLabel as driverLabelOf, initials } from './utils/format';
 
 // ---------------------------------------------------------------------------
@@ -300,7 +315,7 @@ const drivers = ref([]);
 const activityVersion = ref(0); // bumped when new actions arrive so open log views reload
 const attendanceVersion = ref(0); // bumped when a check-in / check-out arrives live
 const activeTabId = ref('CHECKING_BOARD');
-// 'board' | 'driver' | 'fleet' | 'staff' | 'reports' | 'events' | 'settings'
+// 'board' | 'eld' | 'driver' | 'fleet' | 'staff' | 'reports' | 'events' | 'settings'
 const activeView = ref('board');
 // The driver page: which driver, and the page it was opened from ('board' | 'fleet')
 const openedDriverId = ref('');
@@ -317,6 +332,10 @@ const selectedDriverId = ref('');
 const isLive = ref(false);
 // Staff ids of everyone in the team with the app open right now (Realtime Presence)
 const onlineIds = ref(new Set());
+// ELD page (Dispatch Brain): only for accounts it lets in; eldCount = ELD differences right now
+const showEld = computed(() => isBrainConfigured && !!brainAccess.value.me);
+const eldCount = ref(null);
+let eldTimer = null;
 
 // Sidebar open / closed is a per-browser view preference
 const SIDEBAR_KEY = 'checkingboard_sidebar_collapsed';
@@ -582,9 +601,32 @@ async function enterTeam() {
     if (isPhone.value) loadUnread();
   }, 60000);
   loadUnread();
+  startEld();
+}
+
+// The ELD differences count in the sidebar, every 3 minutes (the ELD page keeps its own up to date)
+async function refreshEldCount() {
+  if (!showEld.value || activeView.value === 'eld' || document.hidden) return;
+  try {
+    eldCount.value = (await getEldCheck()).length;
+  } catch {
+    // The ELD page shows the error; the count just stays as it was
+  }
+}
+
+async function startEld() {
+  if (!isBrainConfigured) return;
+  await loadBrainAccess();
+  refreshEldCount();
+  if (eldTimer) clearInterval(eldTimer);
+  eldTimer = setInterval(refreshEldCount, 3 * 60 * 1000);
 }
 
 function leaveTeam() {
+  if (eldTimer) clearInterval(eldTimer);
+  eldTimer = null;
+  resetBrainAccess();
+  eldCount.value = null;
   if (signResetTimer) clearInterval(signResetTimer);
   if (todayTimer) clearInterval(todayTimer);
   signResetTimer = null;
