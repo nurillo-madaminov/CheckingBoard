@@ -111,7 +111,10 @@ const props = defineProps({
   // Staff ids with the app open right now
   onlineIds: { type: Set, default: () => new Set() },
   // Closed = a slim icon rail
-  collapsed: { type: Boolean, default: false }
+  collapsed: { type: Boolean, default: false },
+  // ELD page (Dispatch Brain): shown when this account has access; count = ELD differences
+  showEld: { type: Boolean, default: false },
+  eldCount: { type: Number, default: null }
 });
 
 defineEmits(['navigate', 'logout', 'update:collapsed']);
@@ -129,12 +132,16 @@ const ICONS = {
   staff: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />',
   reports: '<path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />',
   events: '<path d="M9 2h6a1 1 0 0 1 1 1v2H8V3a1 1 0 0 1 1-1z" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M12 11v4" /><path d="M12 18h.01" />',
+  eld: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" />',
   settings: '<path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" />'
 };
 
-// Board, Fleet, Staff, Reports, Events, Settings (Fleet and Staff are for managers and supervisors)
+// Board, ELD, Fleet, Staff, Reports, Events, Settings (Fleet and Staff are for managers and supervisors)
 const items = computed(() => [
   { id: 'board', label: 'Board', title: 'Board: live checking', count: props.boardCount },
+  ...(props.showEld ? [
+    { id: 'eld', label: 'ELD', title: 'ELD: check against Telegram, search, assistant', count: props.eldCount ?? undefined }
+  ] : []),
   ...(isManager.value ? [
     { id: 'fleet', label: 'Fleet', title: 'Fleet: drivers and companies' },
     { id: 'staff', label: 'Staff', title: 'Staff: today, schedule, attendance, members' }

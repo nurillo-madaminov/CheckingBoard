@@ -39,6 +39,7 @@
 
       <div class="split">
         <!-- Now: the board's controls for this driver, with their labels -->
+        <div class="left">
         <section class="cb-panel now" aria-labelledby="now-title">
           <span id="now-title" class="cb-label">Now</span>
 
@@ -103,6 +104,10 @@
             <button type="button" class="cb-link" @click="$emit('open-activity', { search: driver.name })">All of this driver's actions in Reports › Activity</button>
           </div>
         </section>
+
+          <!-- The ELD and Telegram for this driver (Dispatch Brain); hidden without access -->
+          <EldDriverCard v-if="isBrainConfigured" :driver="driver" @saved="$emit('saved', $event)" @error="$emit('error', $event)" />
+        </div>
 
         <!-- History: this driver's records (was: Logs, searched by hand) -->
         <section class="cb-panel history" aria-labelledby="history-title">
@@ -169,6 +174,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import MoreMenu from './MoreMenu.vue';
+import EldDriverCard from './EldDriverCard.vue';
+import { isBrainConfigured } from '../services/dispatchBrainService';
 import { DRIVER_STATUSES, SIGN_STATUSES, getStatusConfig, FLAG_COLOR, isFlagged } from '../config/statusConfig';
 import { getFreshnessInfo, freshnessColor } from '../utils/freshness';
 import { fetchActivities, getActionTypeConfig } from '../services/activityService';
@@ -191,7 +198,7 @@ const props = defineProps({
   keyboardEnabled: { type: Boolean, default: true }
 });
 
-const emit = defineEmits(['back', 'open-driver', 'open-company', 'open-activity', 'update-driver', 'edit-driver', 'delete-driver']);
+const emit = defineEmits(['back', 'open-driver', 'open-company', 'open-activity', 'update-driver', 'edit-driver', 'delete-driver', 'saved', 'error']);
 
 const FRESH_LABELS = { fresh: 'Fresh', aging: 'Aging', warning: 'Due soon', overdue: 'Overdue' };
 const PERIODS = [
@@ -316,7 +323,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .key-on-primary { color: var(--color-bg); border-color: var(--color-accent-300); font-family: var(--font-body); font-size: 11px; }
 
 .split { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
-.now { flex: 1 1 340px; max-width: 440px; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.left { flex: 1 1 340px; max-width: 440px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.now { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 .history { flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; }
 
 .field-label { font-size: 12px; color: var(--color-neutral-700); }
