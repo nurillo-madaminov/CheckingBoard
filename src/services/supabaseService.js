@@ -157,6 +157,19 @@ export function resetActiveDrivers() {
 }
 
 /**
+ * New check round: every non-INACTIVE driver in the team -> never checked (red);
+ * statuses stay as they are
+ */
+export function markActiveDriversUnchecked() {
+  return check(
+    supabase
+      .from('drivers')
+      .update({ last_checked_at: null, updated_at: new Date().toISOString() })
+      .neq('status', 'INACTIVE')
+  );
+}
+
+/**
  * Daily US Eastern sign reset, decided by the database (once per team per day).
  * Returns true when this call performed the reset.
  */
@@ -171,12 +184,13 @@ let activeChannel = null;
 let attendanceChannel = null;
 let presenceChannel = null;
 
-export function broadcastFleetReset() {
+// kind: 'ready' (Fleet: everyone to READY, not checked) or 'unchecked' (Board: not checked only)
+export function broadcastFleetReset(kind = 'ready') {
   if (!activeChannel) return;
   activeChannel.send({
     type: 'broadcast',
     event: 'fleet_reset',
-    payload: { timestamp: Date.now() }
+    payload: { timestamp: Date.now(), kind }
   });
 }
 

@@ -854,8 +854,26 @@ F. TESTS: 32 (supervisor role: manager rights, set and created by managers).
   are unchanged.
 
 --------------------------------------------------------------------------------
+16I. MARK ALL NOT CHECKED (Board)
+--------------------------------------------------------------------------------
+- Managers and supervisors have a "Mark all not checked" button in the Board's
+  header (staff don't see it). After a confirmation it makes every active driver
+  not checked (last_checked_at = NULL: red, "Never", counted as Overdue), so a new
+  check round starts. Statuses stay as they are; INACTIVE drivers are left alone.
+- supabaseService.markActiveDriversUnchecked() updates drivers where status is not
+  INACTIVE (same row security as other driver edits). Teammates' boards reload at
+  once through the fleet_reset broadcast (kind 'unchecked'), with the toast "All
+  drivers marked not checked by another dispatcher".
+- The Fleet page keeps "Reset fleet to Ready…", which also sets every active
+  driver to READY (broadcast kind 'ready').
+
+--------------------------------------------------------------------------------
 17. CHANGE LOG
 --------------------------------------------------------------------------------
+NOVEMBER 2026 - MARK ALL NOT CHECKED ON THE BOARD:
+- Board button for managers and supervisors: every active driver becomes not
+  checked, statuses unchanged (section 16I).
+
 NOVEMBER 2026 - ONLINE STAFF IN THE SIDEBAR:
 - The sidebar shows who is online right now (Realtime Presence), not everyone
   scheduled: "Online now" lists everyone online, the shift on duty first

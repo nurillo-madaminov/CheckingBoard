@@ -115,6 +115,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
           @update-driver="updateDriver"
           @edit-company="openEditCompanyModal"
           @delete-company="deleteCompany"
+          @mark-all-unchecked="handleMarkAllUnchecked"
         />
 
         <FleetView
@@ -553,11 +554,13 @@ function setupRealtime() {
     },
     onActivityInsert: onActivityLogged,
     onAttendanceChange: () => { attendanceVersion.value += 1; },
-    onFleetReset: async () => {
+    onFleetReset: async (event) => {
       drivers.value = sortDrivers(await db.fetchDrivers());
       showToast({
         title: 'Events up to date',
-        message: 'Fleet reset to READY by another dispatcher'
+        message: event?.payload?.kind === 'unchecked'
+          ? 'All drivers marked not checked by another dispatcher'
+          : 'Fleet reset to READY by another dispatcher'
       });
     }
   });
@@ -1107,6 +1110,25 @@ function bulkDeleteDrivers(ids) {
       if (gone.has(selectedDriverId.value)) selectedDriverId.value = '';
       if (await persist(Promise.all(ids.map(id => db.deleteDriver(id))), 'Drivers not deleted')) {
         showToast({ title: `${ids.length} ${ids.length === 1 ? 'driver' : 'drivers'} deleted`, message: 'Logs kept' });
+      }
+    }
+  });
+}
+
+// Board (managers and supervisors): a new check round. Every active driver becomes
+// not checked (red); statuses stay. Inactive drivers are left alone.
+function handleMarkAllUnchecked() {
+  if (!isManager.value) return;
+  const count = drivers.value.filter(d => d.status !== 'INACTIVE').length;
+  askConfirm({
+    title: 'Mark all drivers as not checked?',
+    body: `All ${count} active driver${count === 1 ? '' : 's'} become not checked (red), so the next check round starts clean. Their statuses stay as they are; inactive drivers are left alone. Teammates see it live.`,
+    ok: 'Mark not checked',
+    onConfirm: async () => {
+      drivers.value = drivers.value.map(d => (d.status === 'INACTIVE' ? d : { ...d, lastCheckedAt: null }));
+      if (await persist(db.markActiveDriversUnchecked(), 'Drivers not marked')) {
+        db.broadcastFleetReset('unchecked');
+        showToast({ title: 'All drivers marked not checked', message: 'Statuses unchanged · inactive drivers left alone' });
       }
     }
   });
