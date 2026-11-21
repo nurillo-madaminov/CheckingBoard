@@ -23,6 +23,17 @@
         </button>
         <span v-else class="cb-key search-key">/</span>
       </div>
+      <!-- Managers and supervisors: start a new check round (statuses stay) -->
+      <button
+        v-if="canManageFleet"
+        type="button"
+        class="btn btn-secondary uncheck-all"
+        title="Mark every active driver as not checked, so a new check round starts"
+        @click="$emit('mark-all-unchecked')"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+        Mark all not checked
+      </button>
     </div>
 
     <!-- KPI strip -->
@@ -192,7 +203,7 @@ const props = defineProps({
 const emit = defineEmits([
   'edit-driver', 'delete-driver', 'update-driver', 'edit-company', 'delete-company',
   'select-driver', 'reorder-driver', 'reorder-company',
-  'select-tab', 'reorder-tabs', 'update:searchQuery'
+  'select-tab', 'reorder-tabs', 'update:searchQuery', 'mark-all-unchecked'
 ]);
 
 const searchRef = ref(null);
@@ -524,6 +535,7 @@ function tabDropStyle(tabId) {
 .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .title-block { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .search { position: relative; width: 300px; min-width: 160px; flex-shrink: 1; }
+.uncheck-all { min-height: 34px; flex-shrink: 0; }
 .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--color-neutral-600); }
 .search-input { padding-left: 32px; padding-right: 36px; min-height: 34px; font-size: 13px; background: var(--color-neutral-100); }
 .search-clear {
