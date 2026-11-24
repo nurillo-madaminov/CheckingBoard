@@ -37,6 +37,8 @@ defineProps({
 
 <style scoped>
 .msg { padding: 8px 12px; border-left: 3px solid transparent; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+/* Telegram messages can be selected and copied (the app turns selection off elsewhere) */
+.msg .text, .msg .docs { user-select: text; cursor: text; }
 .msg.is-hit { border-left-color: var(--color-accent); background: var(--color-accent-100); }
 .msg-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .sender { font-weight: 600; max-width: 40%; }

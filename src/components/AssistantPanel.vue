@@ -162,6 +162,8 @@ defineExpose({ ask });
 .chat { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .chat-scroll { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .bubble { max-width: 820px; display: flex; flex-direction: column; gap: 3px; }
+/* The app turns text selection off; chat messages can be selected and copied */
+.bubble .text { user-select: text; cursor: text; }
 .bubble.is-user { align-self: flex-end; text-align: right; }
 .bubble.is-user .text { background: var(--color-accent-100); border: 1px solid var(--color-accent-200); padding: 8px 12px; white-space: pre-wrap; text-align: left; }
 .bubble.is-bot .text { padding: 2px 0; }
