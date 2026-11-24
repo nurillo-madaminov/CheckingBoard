@@ -90,7 +90,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
     />
 
     <main class="main">
-      <!-- 1. BOARD: live checking (home). 2. FLEET (managers): drivers and companies, bulk changes.
+      <!-- 1. BOARD: live checking (home). 2. FLEET (everyone): drivers and companies, bulk changes.
            Both stay alive (open companies, filters, scroll) while a driver page is open. -->
       <KeepAlive :include="['CheckingBoardTable', 'FleetView']">
         <CheckingBoardTable
@@ -119,7 +119,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-public-key</pre>
         />
 
         <FleetView
-          v-else-if="activeView === 'fleet' && isManager"
+          v-else-if="activeView === 'fleet'"
           :companies="companies"
           :drivers="drivers"
           :canManageFleet="isManager"
@@ -461,7 +461,6 @@ function closeDriver() {
 
 // Company link on a driver page: Fleet, filtered to that company
 function openFleetCompany(companyId) {
-  if (!isManager.value) return;
   fleetCompanyId.value = '';
   activeView.value = 'fleet';
   fleetCompanyId.value = companyId;

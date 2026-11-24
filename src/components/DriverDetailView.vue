@@ -4,7 +4,7 @@
     <nav class="cb-crumbs" aria-label="Breadcrumb">
       <button type="button" class="cb-link" @click="$emit('back')">← {{ from === 'fleet' ? 'Fleet' : 'Board' }}</button>
       <span aria-hidden="true">/</span>
-      <button v-if="company && canManageFleet" type="button" class="cb-link" @click="$emit('open-company', company.id)">{{ company.name }}</button>
+      <button v-if="company" type="button" class="cb-link" @click="$emit('open-company', company.id)">{{ company.name }}</button>
       <span v-else-if="company">{{ company.name }}</span>
       <span aria-hidden="true">/</span>
       <span>{{ driver ? label : 'Driver' }}</span>
@@ -97,7 +97,7 @@
 
           <div class="related">
             <span class="cb-label">Related</span>
-            <button v-if="company && canManageFleet" type="button" class="cb-link" @click="$emit('open-company', company.id)">
+            <button v-if="company" type="button" class="cb-link" @click="$emit('open-company', company.id)">
               {{ company.name }} · {{ companyStats }}
             </button>
             <span v-else-if="company" class="cb-sub">{{ company.name }} · {{ companyStats }}</span>

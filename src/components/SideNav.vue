@@ -136,16 +136,14 @@ const ICONS = {
   settings: '<path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" />'
 };
 
-// Board, ELD, Fleet, Staff, Reports, Events, Settings (Fleet and Staff are for managers and supervisors)
+// Board, ELD, Fleet, Staff, Reports, Events, Settings (Staff is for managers and supervisors)
 const items = computed(() => [
   { id: 'board', label: 'Board', title: 'Board: live checking', count: props.boardCount },
   ...(props.showEld ? [
     { id: 'eld', label: 'ELD', title: 'ELD: check against Telegram, search, assistant', count: props.eldCount ?? undefined }
   ] : []),
-  ...(isManager.value ? [
-    { id: 'fleet', label: 'Fleet', title: 'Fleet: drivers and companies' },
-    { id: 'staff', label: 'Staff', title: 'Staff: today, schedule, attendance, members' }
-  ] : []),
+  { id: 'fleet', label: 'Fleet', title: 'Fleet: drivers and companies' },
+  ...(isManager.value ? [{ id: 'staff', label: 'Staff', title: 'Staff: today, schedule, attendance, members' }] : []),
   { id: 'reports', label: 'Reports', title: 'Reports: activity and statistics', count: logsToday.value },
   { id: 'events', label: 'Events', title: 'Events: inspections and accidents' },
   { id: 'settings', label: 'Settings', title: 'Settings: account, rules, office, extensions' }
