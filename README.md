@@ -48,7 +48,7 @@ The sidebar has six sections, most used first:
 | Section | What is in it | Who |
 | --- | --- | --- |
 | **Board** | Live checking only: status filters (Home and Shop apart) above the table and a **Check** button on every row. The icon in the table's top-left corner opens or closes every company; hover a row to flag, edit or delete it. | Everyone |
-| **Fleet** | Every driver (inactive too) with filters and bulk actions; companies. Adding drivers and companies, Reset fleet to Ready and the driver pages (status, notes, recent actions) are here. | Managers, supervisors |
+| **Fleet** | Every driver (inactive too) with filters and bulk actions; companies. Adding drivers and companies, Reset fleet to Ready and the driver pages (status, notes, recent actions) are here. | Everyone (adding, editing and deleting companies and deleting drivers: managers, supervisors) |
 | **Staff** | Today (the shifts running today and who is in), Schedule, Attendance (by day, newest first), Members (managers and supervisors can deactivate or delete). *Message staff* sends an alert to everyone, a shift or one person. | Managers, supervisors |
 | **Reports** | Activity (every action record) and Statistics; a day in Statistics opens its records. | Everyone (Statistics: managers) |
 | **Events** | Inspections and accidents: driver, violation / no violation, level 1-3, notes. Pin a row to keep it at the top. Managers delete. | Everyone |
